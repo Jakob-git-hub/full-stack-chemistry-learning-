@@ -1,20 +1,18 @@
 /**
- * ChemVibe – Frontend Application
- * Appwrite SDK integration for fetching lessons from a database collection.
+ * ChemVibe – Gamified Frontend for Organic Chemistry
+ * Duolingo-style learning experience with Appwrite integration.
  */
 
 // ---------------------------------------------------------------------------
 // Appwrite configuration
-// Replace these values with your own Appwrite project credentials.
 // ---------------------------------------------------------------------------
 const APPWRITE_CONFIG = {
-  endpoint: 'https://cloud.appwrite.io/v1', // your Appwrite endpoint
-  projectId: 'YOUR_PROJECT_ID',             // your Appwrite project ID
-  databaseId: 'chemvibe',                   // database ID
-  collectionId: 'lessons',                  // collection ID for lessons
+  endpoint: 'https://cloud.appwrite.io/v1',
+  projectId: 'YOUR_PROJECT_ID',
+  databaseId: 'chemvibe',
+  collectionId: 'lessons',
 };
 
-// Initialize Appwrite SDK
 const { Client, Databases, Query } = appwrite;
 const client = new Client();
 const databases = new Databases(client);
@@ -28,353 +26,532 @@ client
 // ---------------------------------------------------------------------------
 const app = {
   lessons: [],
+  currentLessonIndex: 0,
+  currentChallengeIndex: 0,
+  hearts: 3,
+  streak: 0,
+  xp: 0,
+  level: 1,
   currentLesson: null,
-  quizAnswers: {},
 
   // -------------------------------------------------------------------------
   // Navigation
   // -------------------------------------------------------------------------
   showHome() {
-    this.hideAllSections();
-    document.getElementById('home').classList.remove('hidden');
-  },
-
-  showDashboard() {
-    this.hideAllSections();
-    const dashboard = document.getElementById('dashboard');
-    dashboard.classList.remove('hidden');
+    this.hideAllViews();
+    document.getElementById('skill-tree-view').classList.remove('hidden');
     this.loadLessons();
   },
 
-  showLesson(lessonId) {
-    const lesson = this.lessons.find((l) => l.$id === lessonId);
-    if (!lesson) return;
-
-    this.currentLesson = lesson;
-    this.quizAnswers = {};
-
-    this.hideAllSections();
-    const view = document.getElementById('lesson-view');
-    view.classList.remove('hidden');
-
-    // Populate header
-    document.getElementById('lesson-category').textContent = lesson.category || 'Chemie';
-    document.getElementById('lesson-title').textContent = lesson.title;
-    document.getElementById('lesson-reading-time').textContent =
-      lesson.readingTime ? `${lesson.readingTime} min Lesezeit` : '';
-
-    // Populate content
-    document.getElementById('lesson-content').innerHTML = lesson.content || '<p>Kein Inhalt verfügbar.</p>';
-
-    // Reset quiz UI
-    const quizContainer = document.getElementById('quiz-container');
-    const quizSubmit = document.getElementById('quiz-submit');
-    const quizResult = document.getElementById('quiz-result');
-
-    quizContainer.innerHTML = '';
-    quizSubmit.classList.add('hidden');
-    quizResult.classList.add('hidden');
-    quizResult.innerHTML = '';
-
-    // Render quiz questions if present
-    const questions = lesson.quizQuestions || [];
-    if (questions.length > 0) {
-      questions.forEach((q, index) => {
-        const questionEl = document.createElement('div');
-        questionEl.className = 'glass-card p-6 rounded-2xl border border-amber-100 mb-4';
-
-        const title = document.createElement('h3');
-        title.className = 'text-lg font-bold text-slate-800 mb-4';
-        title.textContent = `Frage ${index + 1}: ${q.question}`;
-        questionEl.appendChild(title);
-
-        const optionsList = document.createElement('div');
-        optionsList.className = 'space-y-2';
-
-        q.options.forEach((option, optIndex) => {
-          const label = document.createElement('label');
-          label.className =
-            'quiz-option block w-full px-4 py-3 rounded-xl border border-amber-200 bg-white text-left cursor-pointer hover:bg-amber-50 transition';
-
-          const radio = document.createElement('input');
-          radio.type = 'radio';
-          radio.name = `quiz-${lesson.$id}-q${index}`;
-          radio.value = optIndex;
-          radio.className = 'mr-3 text-amber-600';
-          radio.addEventListener('change', () => {
-            this.quizAnswers[index] = optIndex;
-            // Visual feedback: mark selected
-            document
-              .querySelectorAll(`input[name="quiz-${lesson.$id}-q${index}"]`)
-              .forEach((r) => {
-                r.parentElement.classList.remove('selected');
-              });
-            label.classList.add('selected');
-          });
-
-          const text = document.createElement('span');
-          text.textContent = option;
-
-          label.appendChild(radio);
-          label.appendChild(text);
-          optionsList.appendChild(label);
-        });
-
-        questionEl.appendChild(optionsList);
-        quizContainer.appendChild(questionEl);
-      });
-
-      quizSubmit.classList.remove('hidden');
-      quizSubmit.onclick = () => this.submitQuiz();
-    } else {
-      quizSubmit.classList.add('hidden');
-    }
+  showSkillTree() {
+    this.hideAllViews();
+    document.getElementById('skill-tree-view').classList.remove('hidden');
+    this.renderSkillTree();
   },
 
-  hideAllSections() {
-    document.getElementById('home').classList.add('hidden');
-    document.getElementById('dashboard').classList.add('hidden');
+  hideAllViews() {
+    document.getElementById('skill-tree-view').classList.add('hidden');
     document.getElementById('lesson-view').classList.add('hidden');
-  },
-
-  toggleMobileMenu() {
-    const menu = document.getElementById('mobile-menu');
-    menu.classList.toggle('hidden');
+    document.getElementById('result-view').classList.add('hidden');
+    document.getElementById('hearts-modal').classList.add('hidden');
   },
 
   // -------------------------------------------------------------------------
   // Data loading (Appwrite)
   // -------------------------------------------------------------------------
   async loadLessons() {
-    const skeletonLoader = document.getElementById('skeleton-loader');
-    const lessonsGrid = document.getElementById('lessons-grid');
-    const emptyState = document.getElementById('empty-state');
-
-    skeletonLoader.classList.remove('hidden');
-    lessonsGrid.classList.add('hidden');
-    emptyState.classList.add('hidden');
+    const loading = document.getElementById('skill-tree-loading');
+    const nodes = document.getElementById('skill-nodes');
+    loading.classList.remove('hidden');
+    nodes.innerHTML = '';
 
     try {
-      // Fetch documents from Appwrite collection `lessons`
       const response = await databases.listDocuments(
         APPWRITE_CONFIG.databaseId,
         APPWRITE_CONFIG.collectionId,
-        [Query.limit(100), Query.orderDesc('$createdAt')]
+        [Query.limit(100), Query.orderAsc('order')]
       );
-
       this.lessons = response.documents || [];
-      this.renderLessons(this.lessons);
     } catch (error) {
-      console.error('Fehler beim Laden der Lektionen aus Appwrite:', error);
-      // Fallback: show demo lessons if Appwrite is not configured
+      console.error('Appwrite load error:', error);
       this.lessons = this.getDemoLessons();
-      this.renderLessons(this.lessons, true);
     } finally {
-      skeletonLoader.classList.add('hidden');
-      lessonsGrid.classList.remove('hidden');
+      loading.classList.add('hidden');
+      this.renderSkillTree();
     }
   },
 
-  renderLessons(lessons, isDemo = false) {
-    const lessonsGrid = document.getElementById('lessons-grid');
-    const emptyState = document.getElementById('empty-state');
+  renderSkillTree() {
+    const nodesContainer = document.getElementById('skill-nodes');
+    nodesContainer.innerHTML = '';
 
-    lessonsGrid.innerHTML = '';
-
-    if (!lessons || lessons.length === 0) {
-      lessonsGrid.classList.add('hidden');
-      emptyState.classList.remove('hidden');
+    if (!this.lessons || this.lessons.length === 0) {
+      nodesContainer.innerHTML = '<p class="text-slate-500 text-center">Keine Lektionen verfügbar.</p>';
       return;
     }
 
-    lessonsGrid.classList.remove('hidden');
-    emptyState.classList.add('hidden');
+    this.lessons.forEach((lesson, index) => {
+      const isUnlocked = index === 0 || index <= this.currentLessonIndex;
+      const isCompleted = index < this.currentLessonIndex;
+      const isCurrent = index === this.currentLessonIndex;
 
-    const categoryColors = {
-      'Anorganische Chemie': 'bg-amber-100 text-amber-700',
-      'Organische Chemie': 'bg-rose-100 text-rose-700',
-      'Physikalische Chemie': 'bg-indigo-100 text-indigo-700',
-      Allgemein: 'bg-emerald-100 text-emerald-700',
-    };
+      const node = document.createElement('div');
+      node.className = `skill-node ${!isUnlocked ? 'locked' : ''} ${isCompleted ? 'completed' : ''} ${isCurrent ? 'current' : ''}`;
+      node.style.animationDelay = `${index * 0.1}s`;
+      node.classList.add('fade-in');
 
-    lessons.forEach((lesson) => {
-      const card = document.createElement('article');
-      card.className =
-        'glass-card p-6 rounded-2xl border border-amber-100 hover:shadow-xl transition cursor-pointer group';
-
-      const categoryClass = categoryColors[lesson.category || 'Allgemein'] || 'bg-amber-100 text-amber-700';
-
-      card.innerHTML = `
-        <div class="flex items-start justify-between mb-4">
-          <span class="px-3 py-1 rounded-full text-xs font-semibold ${categoryClass}">
-            ${lesson.category || 'Allgemein'}
-          </span>
-          <span class="text-xs text-slate-400">${lesson.readingTime || '5'} min</span>
-        </div>
-        <h3 class="text-xl font-bold text-slate-800 mb-2 group-hover:text-amber-600 transition">
-          ${lesson.title}
-        </h3>
-        <p class="text-slate-600 text-sm mb-4 line-clamp-2">
-          ${lesson.description || 'Entdecke die faszinierende Welt der Chemie in dieser Lektion.'}
-        </p>
-        <div class="flex items-center justify-between pt-4 border-t border-amber-50">
-          <span class="text-sm font-medium text-slate-500">Lektion starten</span>
-          <svg class="w-4 h-4 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24">
-            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 7l5 5m0 0l-5 5m5-5H6"></path>
-          </svg>
-        </div>
-      `;
-
-      card.onclick = () => this.showLesson(lesson.$id);
-      lessonsGrid.appendChild(card);
-    });
-  },
-
-  // -------------------------------------------------------------------------
-  // Quiz evaluation
-  // -------------------------------------------------------------------------
-  submitQuiz() {
-    const questions = this.currentLesson.quizQuestions || [];
-    let correct = 0;
-
-    questions.forEach((q, index) => {
-      const selected = this.quizAnswers[index];
-      const correctIndex = q.correctAnswerIndex;
-
-      if (selected === correctIndex) {
-        correct++;
+      if (!isUnlocked) {
+        node.innerHTML = `
+          <div class="lock-overlay">
+            <div class="w-12 h-12 rounded-full bg-slate-200 flex items-center justify-center text-slate-500 font-bold text-xl">
+              🔒
+            </div>
+          </div>
+          <div class="mt-4 text-center">
+            <div class="w-16 h-16 rounded-full bg-slate-100 flex items-center justify-center mx-auto mb-2 text-slate-400 text-xl">
+              ${lesson.icon || '⚛️'}
+            </div>
+            <h4 class="text-sm font-semibold text-slate-400 mb-1">${lesson.title}</h4>
+            <p class="text-xs text-slate-400">Bald verfügbar</p>
+          </div>
+        `;
+      } else {
+        node.innerHTML = `
+          <div class="mt-4 text-center">
+            <div class="w-16 h-16 rounded-full ${isCompleted ? 'bg-emerald-100 text-emerald-600' : 'bg-amber-100 text-amber-600'} flex items-center justify-center mx-auto mb-2 text-xl shadow-md">
+              ${isCompleted ? '✅' : lesson.icon || '⚛️'}
+            </div>
+            <h4 class="text-sm font-semibold ${isCompleted ? 'text-emerald-700' : 'text-slate-800'} mb-1">${lesson.title}</h4>
+            <p class="text-xs ${isCompleted ? 'text-emerald-500' : 'text-slate-500'}">${isCompleted ? 'Abgeschlossen' : 'Bereit'}</p>
+          </div>
+        `;
+        node.onclick = () => this.startLesson(index);
       }
 
-      // Visual feedback on options
-      const radios = document.querySelectorAll(`input[name="quiz-${this.currentLesson.$id}-q${index}"]`);
-      radios.forEach((radio) => {
-        const label = radio.parentElement;
-        label.classList.remove('selected');
-        if (parseInt(radio.value) === correctIndex) {
-          label.classList.add('correct');
-        } else if (parseInt(radio.value) === selected && selected !== correctIndex) {
-          label.classList.add('wrong');
-        }
-        radio.disabled = true;
-      });
+      nodesContainer.appendChild(node);
     });
-
-    const percentage = Math.round((correct / questions.length) * 100);
-    const resultEl = document.getElementById('quiz-result');
-    const submitBtn = document.getElementById('quiz-submit');
-
-    submitBtn.classList.add('hidden');
-
-    let message = '';
-    let icon = '';
-    if (percentage === 100) {
-      message = 'Perfekt! Du hast die Lektion gemeistert.';
-      icon = '🎉';
-    } else if (percentage >= 70) {
-      message = 'Gut gemacht! Ein wenig mehr Übung und du bist ein Profi.';
-      icon = '👍';
-    } else {
-      message = 'Nicht ganz. Schau dir die Lektion noch einmal an und versuche es erneut.';
-      icon = '📚';
-    }
-
-    resultEl.innerHTML = `
-      <div class="bg-amber-50 border border-amber-200 rounded-2xl p-6">
-        <div class="text-4xl mb-3">${icon}</div>
-        <h3 class="text-xl font-bold text-slate-800 mb-2">Ergebnis: ${correct} / ${questions.length}</h3>
-        <p class="text-slate-600 mb-4">${message}</p>
-        <button onclick="app.showLesson('${this.currentLesson.$id}')" class="px-6 py-2 rounded-xl bg-amber-600 text-white font-medium hover:bg-amber-700 transition">
-          Noch einmal versuchen
-        </button>
-      </div>
-    `;
-    resultEl.classList.remove('hidden');
   },
 
   // -------------------------------------------------------------------------
-  // Demo fallback data (used when Appwrite is not configured)
+  // Lesson flow
+  // -------------------------------------------------------------------------
+  startLesson(index) {
+    if (this.hearts <= 0) {
+      document.getElementById('hearts-modal').classList.remove('hidden');
+      return;
+    }
+
+    this.currentLessonIndex = index;
+    this.currentChallengeIndex = 0;
+    this.currentLesson = this.lessons[index];
+
+    this.hideAllViews();
+    document.getElementById('lesson-view').classList.remove('hidden');
+    this.updateStatusBar();
+    this.renderLessonStep();
+  },
+
+  renderLessonStep() {
+    const container = document.getElementById('lesson-container');
+    const lesson = this.currentLesson;
+    const steps = lesson.steps || [];
+    const step = steps[this.currentChallengeIndex];
+
+    // Progress
+    document.getElementById('lesson-progress').textContent = `${this.currentChallengeIndex + 1} / ${steps.length}`;
+    document.getElementById('hearts-warning').classList.toggle('hidden', this.hearts > 1);
+
+    if (!step) {
+      this.finishLesson();
+      return;
+    }
+
+    container.innerHTML = '';
+
+    // Info chunk (if present)
+    if (step.info) {
+      const infoEl = document.createElement('div');
+      infoEl.className = 'info-chunk fade-in';
+      infoEl.innerHTML = `
+        <h3>${step.info.title || 'Wusstest du?'}</h3>
+        <div class="prose-content">${step.info.content}</div>
+      `;
+      container.appendChild(infoEl);
+    }
+
+    // Challenge
+    const challengeEl = document.createElement('div');
+    challengeEl.className = 'challenge-card fade-in';
+    challengeEl.innerHTML = this.buildChallengeHTML(step);
+    container.appendChild(challengeEl);
+
+    // Continue button (hidden until answered)
+    const continueBtn = document.createElement('button');
+    continueBtn.id = 'continue-btn';
+    continueBtn.className = 'hidden w-full py-3 rounded-2xl bg-amber-500 text-white font-bold shadow-lg hover:bg-amber-600 transform hover:-translate-y-1 transition mt-6';
+    continueBtn.textContent = 'Weiter';
+    continueBtn.onclick = () => this.nextStep();
+    container.appendChild(continueBtn);
+
+    // Initialize challenge interactivity
+    this.initChallenge(step);
+  },
+
+  buildChallengeHTML(step) {
+    const type = step.type;
+    const id = `challenge-${this.currentChallengeIndex}`;
+
+    switch (type) {
+      case 'multiple_choice':
+        return `
+          <p class="text-lg font-bold text-slate-800 mb-6">${step.question}</p>
+          <div class="space-y-3" id="options-${id}">
+            ${step.options.map((opt, i) => `
+              <button class="option-btn w-full text-left px-4 py-3 rounded-xl border border-amber-200 bg-white text-left" onclick="app.selectOption(${i})">
+                ${opt}
+              </button>
+            `).join('')}
+          </div>
+          <p id="feedback-${id}" class="mt-4 text-sm font-medium hidden"></p>
+        `;
+
+      case 'drag_drop':
+        return `
+          <p class="text-lg font-bold text-slate-800 mb-6">${step.question}</p>
+          <div class="flex flex-col md:flex-row gap-6 items-start">
+            <div class="flex-1 space-y-3">
+              <span class="text-sm font-medium text-slate-500">Ziehe die Begriffe an die richtige Stelle:</span>
+              <div id="draggables-${id}" class="space-y-2">
+                ${step.items.map((item, i) => `
+                  <div class="draggable-item" draggable="true" data-index="${i}" data-value="${item.value}">
+                    ${item.label}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+            <div class="flex-1 space-y-3">
+              <span class="text-sm font-medium text-slate-500">Zielbereiche:</span>
+              <div id="drops-${id}" class="grid grid-cols-1 gap-3">
+                ${step.targets.map((t, i) => `
+                  <div class="drop-zone" data-target="${t.id}" ondrop="app.handleDrop(event, ${i})" ondragover="app.handleDragOver(event)" ondragleave="app.handleDragLeave(event)">
+                    ${t.label}
+                  </div>
+                `).join('')}
+              </div>
+            </div>
+          </div>
+          <p id="feedback-${id}" class="mt-4 text-sm font-medium hidden"></p>
+        `;
+
+      case 'matching':
+        return `
+          <p class="text-lg font-bold text-slate-800 mb-6">${step.question}</p>
+          <div class="grid grid-cols-1 md:grid-cols-2 gap-4" id="matching-${id}">
+            ${step.pairs.map((pair, i) => `
+              <div class="flex items-center gap-3 p-3 rounded-xl border border-amber-200 bg-white">
+                <input type="radio" name="match-${id}" value="${i}" class="w-5 h-5 text-amber-600" onchange="app.selectMatch(${i})">
+                <span class="text-slate-700">${pair.left}</span>
+                <span class="ml-auto text-xs font-medium text-slate-400">↔</span>
+                <span class="text-slate-700">${pair.right}</span>
+              </div>
+            `).join('')}
+          </div>
+          <p id="feedback-${id}" class="mt-4 text-sm font-medium hidden"></p>
+        `;
+
+      case 'molecule':
+        return `
+          <p class="text-lg font-bold text-slate-800 mb-6">${step.question}</p>
+          <div class="molecule-viz" id="molecule-${id}">
+            ${step.atoms.map(a => `<span class="atom atom-${a.type}">${a.symbol}</span>`).join('')}
+          </div>
+          <div class="mt-6 space-y-3" id="molecule-options-${id}">
+            ${step.options.map((opt, i) => `
+              <button class="option-btn w-full text-left px-4 py-3 rounded-xl border border-amber-200 bg-white text-left" onclick="app.selectMolecule(${i})">
+                ${opt}
+              </button>
+            `).join('')}
+          </div>
+          <p id="feedback-${id}" class="mt-4 text-sm font-medium hidden"></p>
+        `;
+
+      default:
+        return `<p class="text-slate-500">Unbekannter Aufgabentyp.</p>`;
+    }
+  },
+
+  // -------------------------------------------------------------------------
+  // Challenge interactions
+  // -------------------------------------------------------------------------
+  selectOption(index) {
+    const step = this.currentLesson.steps[this.currentChallengeIndex];
+    const correct = step.correctAnswerIndex;
+
+    const buttons = document.querySelectorAll(`#options-challenge-${this.currentChallengeIndex} button`);
+    buttons.forEach((btn, i) => {
+      btn.classList.remove('selected', 'correct', 'wrong');
+      btn.disabled = true;
+      if (i === correct) btn.classList.add('correct');
+      if (i === index && index !== correct) btn.classList.add('wrong');
+      if (i === index && index === correct) btn.classList.add('selected');
+    });
+
+    const feedback = document.getElementById(`feedback-challenge-${this.currentChallengeIndex}`);
+    feedback.classList.remove('hidden');
+    feedback.textContent = index === correct ? 'Richtig! 🎉' : 'Fast, aber nicht ganz.';
+    feedback.className = `mt-4 text-sm font-medium ${index === correct ? 'text-emerald-600' : 'text-rose-600'}`;
+
+    if (index === correct) {
+      this.xp += 10;
+      this.updateStatusBar();
+    } else {
+      this.loseHeart();
+    }
+
+    document.getElementById('continue-btn').classList.remove('hidden');
+  },
+
+  selectMatch(index) {
+    this.xp += 10;
+    this.updateStatusBar();
+    document.getElementById('continue-btn').classList.remove('hidden');
+  },
+
+  selectMolecule(index) {
+    const step = this.currentLesson.steps[this.currentChallengeIndex];
+    const correct = step.correctAnswerIndex;
+
+    const buttons = document.querySelectorAll(`#molecule-options-challenge-${this.currentChallengeIndex} button`);
+    buttons.forEach((btn, i) => {
+      btn.classList.remove('selected', 'correct', 'wrong');
+      btn.disabled = true;
+      if (i === correct) btn.classList.add('correct');
+      if (i === index && index !== correct) btn.classList.add('wrong');
+    });
+
+    const feedback = document.getElementById(`feedback-challenge-${this.currentChallengeIndex}`);
+    feedback.classList.remove('hidden');
+    feedback.textContent = index === correct ? 'Richtig! 🎉' : 'Falsche Molekülstruktur.';
+    feedback.className = `mt-4 text-sm font-medium ${index === correct ? 'text-emerald-600' : 'text-rose-600'}`;
+
+    if (index === correct) {
+      this.xp += 10;
+      this.updateStatusBar();
+    } else {
+      this.loseHeart();
+    }
+
+    document.getElementById('continue-btn').classList.remove('hidden');
+  },
+
+  handleDragOver(e) { e.preventDefault(); },
+  handleDragLeave(e) { e.currentTarget.classList.remove('drag-over'); },
+  handleDragStart(e) {
+    app.dragData = { index: e.target.dataset.index, value: e.target.dataset.value };
+    e.target.classList.add('dragging');
+  },
+  handleDragEnd(e) {
+    e.target.classList.remove('dragging');
+    app.dragData = null;
+  },
+  handleDrop(e, targetIndex) {
+    e.preventDefault();
+    const zone = e.currentTarget;
+    zone.classList.remove('drag-over');
+
+    if (!app.dragData) return;
+
+    const step = app.currentLesson.steps[app.currentChallengeIndex];
+    const target = step.targets[targetIndex];
+    const correctValue = target.correctValue;
+
+    if (app.dragData.value === correctValue) {
+      zone.classList.add('correct');
+      zone.innerHTML = `<span class="text-emerald-600 font-bold">✅ ${target.label}</span>`;
+      app.xp += 10;
+      app.updateStatusBar();
+    } else {
+      zone.classList.add('wrong');
+      app.loseHeart();
+    }
+
+    const draggable = document.querySelector(`[data-index="${app.dragData.index}"]`);
+    if (draggable) draggable.remove();
+
+    document.getElementById('continue-btn').classList.remove('hidden');
+  },
+
+  initChallenge(step) {
+    document.querySelectorAll('.draggable-item').forEach(el => {
+      el.addEventListener('dragstart', (e) => app.handleDragStart(e));
+      el.addEventListener('dragend', (e) => app.handleDragEnd(e));
+    });
+  },
+
+  loseHeart() {
+    this.hearts = Math.max(0, this.hearts - 1);
+    this.updateStatusBar();
+    if (this.hearts <= 0) {
+      setTimeout(() => {
+        document.getElementById('hearts-modal').classList.remove('hidden');
+      }, 1000);
+    }
+  },
+
+  nextStep() {
+    this.currentChallengeIndex++;
+    this.renderLessonStep();
+  },
+
+  // -------------------------------------------------------------------------
+  // Completion
+  // -------------------------------------------------------------------------
+  finishLesson() {
+    this.hideAllViews();
+    document.getElementById('result-view').classList.remove('hidden');
+
+    if (this.currentLessonIndex >= this.lessons.length - 1) {
+      this.currentLessonIndex = this.lessons.length - 1;
+    } else {
+      this.currentLessonIndex++;
+    }
+
+    this.streak++;
+    this.xp += 50;
+    this.level = Math.floor(this.xp / 100) + 1;
+    this.updateStatusBar();
+
+    document.getElementById('result-emoji').textContent = '🎉';
+    document.getElementById('result-title').textContent = 'Lektion abgeschlossen!';
+    document.getElementById('result-message').textContent = `+50 XP • Streak: ${this.streak} Tag${this.streak !== 1 ? 'e' : ''}`;
+  },
+
+  continueSkillTree() {
+    this.showSkillTree();
+  },
+
+  repeatLesson() {
+    this.hideAllViews();
+    document.getElementById('lesson-view').classList.remove('hidden');
+    this.currentChallengeIndex = 0;
+    this.renderLessonStep();
+  },
+
+  // -------------------------------------------------------------------------
+  // Status bar
+  // -------------------------------------------------------------------------
+  updateStatusBar() {
+    document.getElementById('hearts-display').textContent = '❤️'.repeat(this.hearts) + '🤍'.repeat(3 - this.hearts);
+    document.getElementById('hearts-count').textContent = this.hearts;
+    document.getElementById('streak-display').textContent = this.streak;
+    document.getElementById('xp-display').textContent = this.xp;
+  },
+
+  // -------------------------------------------------------------------------
+  // Demo fallback data
   // -------------------------------------------------------------------------
   getDemoLessons() {
     return [
       {
         $id: 'demo-1',
-        title: 'Das Periodensystem verstehen',
-        category: 'Anorganische Chemie',
-        description: 'Lerne die Struktur des Periodensystems und die wichtigsten Elemente kennen.',
-        readingTime: 8,
-        content: `
-          <h2>Das Periodensystem der Elemente</h2>
-          <p>Das Periodensystem ordnet alle bekannten chemischen Elemente nach ihrer Ordnungszahl und ihren Eigenschaften an.</p>
-          <p>Elemente in derselben Spalte (Gruppe) haben ähnliche chemische Eigenschaften, da sie die gleiche Anzahl an Valenzelektronen besitzen.</p>
-          <ul>
-            <li><strong>Perioden</strong> sind die waagerechten Reihen.</li>
-            <li><strong>Gruppen</strong> sind die senkrechten Spalten.</li>
-            <li>Edelgase (Gruppe 18) sind besonders reaktionsträge.</li>
-          </ul>
-        `,
-        quizQuestions: [
+        title: 'Alkane & Kohlenwasserstoffe',
+        icon: '🛢️',
+        order: 1,
+        steps: [
           {
-            question: 'Was ordnet die Elemente im Periodensystem primär an?',
-            options: ['Nach der Ordnungszahl', 'Nach dem Namen', 'Nach der Farbe', 'Nach dem Gewicht'],
-            correctAnswerIndex: 0,
+            type: 'info',
+            info: {
+              title: 'Was sind Alkane?',
+              content: 'Alkane sind gesättigte Kohlenwasserstoffe, die nur aus einfachen C-C- und C-H-Bindungen bestehen. Die allgemeine Formel lautet CₙH₂ₙ₊₂.'
+            }
           },
           {
-            question: 'Welche Gruppe ist besonders reaktionsträge?',
-            options: ['Alkalimetalle', 'Halogene', 'Edelgase', 'Übergangsmetalle'],
-            correctAnswerIndex: 2,
+            type: 'multiple_choice',
+            question: 'Welche Formel gehört zu Propan (C₃H₈)?',
+            options: ['C₃H₈', 'C₃H₆', 'C₄H₁₀', 'C₂H₆'],
+            correctAnswerIndex: 0
           },
-        ],
+          {
+            type: 'drag_drop',
+            question: 'Ordne die Kohlenwasserstoffe ihrer Formel zu:',
+            items: [
+              { label: 'Methan', value: 'CH₄' },
+              { label: 'Ethan', value: 'C₂H₆' },
+              { label: 'Propan', value: 'C₃H₈' }
+            ],
+            targets: [
+              { id: 't1', label: 'Methan', correctValue: 'CH₄' },
+              { id: 't2', label: 'Ethan', correctValue: 'C₂H₆' },
+              { id: 't3', label: 'Propan', correctValue: 'C₃H₈' }
+            ]
+          }
+        ]
       },
       {
         $id: 'demo-2',
-        title: 'Chemische Bindungen',
-        category: 'Allgemein',
-        description: 'Wie Atome sich verbinden und Moleküle bilden.',
-        readingTime: 10,
-        content: `
-          <h2>Chemische Bindungen</h2>
-          <p>Atome verbinden sich zu Molekülen durch chemische Bindungen. Die zwei wichtigsten Arten sind ionische und kovalente Bindungen.</p>
-          <p>Bei einer <strong>kovalenten Bindung</strong> teilen sich Atome Elektronenpaare. Bei einer <strong>ionischen Bindung</strong> werden Elektronen von einem Atom zum anderen übertragen.</p>
-        `,
-        quizQuestions: [
+        title: 'Alkene & Doppelbindungen',
+        icon: '🔗',
+        order: 2,
+        steps: [
           {
-            question: 'Was passiert bei einer kovalenten Bindung?',
-            options: [
-              'Elektronen werden übertragen',
-              'Elektronenpaare werden geteilt',
-              'Keine Wechselwirkung',
-              'Nur Ionen sind beteiligt',
-            ],
-            correctAnswerIndex: 1,
+            type: 'info',
+            info: {
+              title: 'Alkene',
+              content: 'Alkene enthalten mindestens eine C=C-Doppelbindung. Sie sind ungesättigt und reaktionsfreudiger als Alkane.'
+            }
           },
-        ],
+          {
+            type: 'molecule',
+            question: 'Welches Molekül ist Ethen?',
+            atoms: [
+              { type: 'carbon', symbol: 'C' },
+              { type: 'carbon', symbol: 'C' },
+              { type: 'hydrogen', symbol: 'H' },
+              { type: 'hydrogen', symbol: 'H' },
+              { type: 'hydrogen', symbol: 'H' },
+              { type: 'hydrogen', symbol: 'H' }
+            ],
+            options: ['C₂H₄ (Ethen)', 'C₂H₆ (Ethan)', 'C₃H₆ (Propen)'],
+            correctAnswerIndex: 0
+          }
+        ]
       },
       {
         $id: 'demo-3',
-        title: 'Säuren und Basen',
-        category: 'Allgemein',
-        description: 'Der pH-Wert und die Eigenschaften von Säuren und Basen.',
-        readingTime: 6,
-        content: `
-          <h2>Säuren und Basen</h2>
-          <p>Der pH-Wert gibt an, wie sauer oder basisch eine Lösung ist. Er reicht von 0 (sehr sauer) bis 14 (sehr basisch).</p>
-          <p>Ein pH-Wert von 7 ist neutral (z. B. reines Wasser).</p>
-        `,
-        quizQuestions: [
+        title: 'Alkohole & Funktionsgruppen',
+        icon: '🧪',
+        order: 3,
+        steps: [
           {
-            question: 'Welcher pH-Wert ist neutral?',
-            options: ['0', '7', '14', '1'],
-            correctAnswerIndex: 1,
+            type: 'info',
+            info: {
+              title: 'Alkohole',
+              content: 'Alkohole enthalten eine oder mehrere Hydroxylgruppen (-OH). Die einfachste Form ist Methanol (CH₃OH).'
+            }
           },
-        ],
-      },
+          {
+            type: 'matching',
+            question: 'Ordne die Funktionsgruppe zur Verbindung:',
+            pairs: [
+              { left: 'Ethanol', right: 'C₂H₅OH' },
+              { left: 'Methanol', right: 'CH₃OH' },
+              { left: 'Propanol', right: 'C₃H₇OH' }
+            ]
+          }
+        ]
+      }
     ];
   },
+
+  // -------------------------------------------------------------------------
+  // Initialize
+  // -------------------------------------------------------------------------
+  init() {
+    this.updateStatusBar();
+  }
 };
 
-// ---------------------------------------------------------------------------
-// Initialize
-// ---------------------------------------------------------------------------
 document.addEventListener('DOMContentLoaded', () => {
+  app.init();
   app.showHome();
 });
