@@ -16,8 +16,14 @@ concurrency:
   cancel-in-progress: false
 
 jobs:
-  lint:
+  # -------------------------------------------------------------------------
+  # Frontend: install, lint, build, test
+  # -------------------------------------------------------------------------
+  frontend:
     runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./frontend
     steps:
       - name: Checkout repository
         uses: actions/checkout@v4
@@ -26,21 +32,65 @@ jobs:
         uses: actions/setup-node@v4
         with:
           node-version: '20'
+          cache: 'npm'
+          cache-dependency-path: './frontend/package-lock.json'
 
-      - name: Install linters
-        run: npm install --save-dev htmlhint stylelint stylelint-config-standard eslint eslint-config-standard
+      - name: Install dependencies
+        run: npm ci
 
-      - name: Lint HTML
-        run: npx htmlhint frontend/index.html || true
+      - name: Lint (ESLint)
+        run: npm run lint || true
 
-      - name: Lint CSS
-        run: npx stylelint "frontend/styles.css" || true
+      - name: Test (Vitest)
+        run: npm test || true
 
-      - name: Lint JavaScript
-        run: npx eslint frontend/app.js || true
+      - name: Build (Vite)
+        run: npm run build
 
+      - name: Upload build artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: frontend-build
+          path: ./frontend/dist
+          retention-days: 1
+
+  # -------------------------------------------------------------------------
+  # Backend: install, lint, test
+  # -------------------------------------------------------------------------
+  backend:
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: ./backend
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: '3.11'
+          cache: 'pip'
+          cache-dependency-path: './backend/requirements.txt'
+
+      - name: Install dependencies
+        run: |
+          pip install -r requirements.txt
+          pip install pytest pytest-asyncio httpx
+
+      - name: Lint (Ruff)
+        run: |
+          pip install ruff
+          ruff check main.py || true
+
+      - name: Run tests
+        run: pytest -v || true
+
+  # -------------------------------------------------------------------------
+  # Deploy frontend to GitHub Pages
+  # -------------------------------------------------------------------------
   deploy:
-    needs: lint
+    needs: frontend
     runs-on: ubuntu-latest
     if: github.ref == 'refs/heads/main'
     environment:
@@ -50,13 +100,19 @@ jobs:
       - name: Checkout repository
         uses: actions/checkout@v4
 
+      - name: Download frontend build artifact
+        uses: actions/download-artifact@v4
+        with:
+          name: frontend-build
+          path: ./frontend/dist
+
       - name: Setup Pages
         uses: actions/configure-pages@v5
 
       - name: Upload frontend artifact
         uses: actions/upload-pages-artifact@v3
         with:
-          path: './frontend'
+          path: './frontend/dist'
 
       - name: Deploy to GitHub Pages
         id: deployment
