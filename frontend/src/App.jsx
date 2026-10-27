@@ -1,5 +1,6 @@
-import { useState, useEffect, useCallback } from "react";
+import { useState, useEffect, useCallback, useRef } from "react";
 import MoleculeBuilder from "./components/MoleculeBuilder";
+import AdminDashboard from "./components/AdminDashboard";
 import {
   fetchPublishedLessons,
   fetchDrafts,
@@ -106,6 +107,31 @@ export default function App() {
   const [level, setLevel] = useState(1);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
+  const [showAdmin, setShowAdmin] = useState(false);
+
+  // Admin Dashboard mit Tastenkombination öffnen (Ctrl+Shift+A)
+  const adminKeyRef = useRef({ ctrl: false, shift: false, a: false });
+  useEffect(() => {
+    const handleKeyDown = (e) => {
+      if (e.key === "Control") adminKeyRef.current.ctrl = true;
+      if (e.key === "Shift") adminKeyRef.current.shift = true;
+      if (e.key.toLowerCase() === "a") adminKeyRef.current.a = true;
+      if (adminKeyRef.current.ctrl && adminKeyRef.current.shift && adminKeyRef.current.a) {
+        setShowAdmin(true);
+      }
+    };
+    const handleKeyUp = (e) => {
+      if (e.key === "Control") adminKeyRef.current.ctrl = false;
+      if (e.key === "Shift") adminKeyRef.current.shift = false;
+      if (e.key.toLowerCase() === "a") adminKeyRef.current.a = false;
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    window.addEventListener("keyup", handleKeyUp);
+    return () => {
+      window.removeEventListener("keydown", handleKeyDown);
+      window.removeEventListener("keyup", handleKeyUp);
+    };
+  }, []);
 
   // -------------------------------------------------------------------------
   // Lektionen laden (aus Appwrite oder Demo-Fallback)
@@ -209,7 +235,16 @@ export default function App() {
           </div>
         )}
 
-        <h2 className="text-2xl font-bold text-gray-800 mb-6">Lektionen entdecken</h2>
+        <div className="flex items-center justify-between mb-6">
+          <h2 className="text-2xl font-bold text-gray-800">Lektionen entdecken</h2>
+          <button
+            onClick={() => setShowAdmin(true)}
+            className="px-4 py-2 rounded-xl font-semibold bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 text-sm flex items-center gap-2"
+            title="Admin Dashboard (Ctrl+Shift+A)"
+          >
+            ⚙️ Admin
+          </button>
+        </div>
 
         {/* Lektions-Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
@@ -357,6 +392,12 @@ export default function App() {
   // -------------------------------------------------------------------------
   // Haupt-Render je nach View
   // -------------------------------------------------------------------------
+  if (showAdmin) {
+    return (
+      <AdminDashboard onClose={() => setShowAdmin(false)} />
+    );
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800">
       {view === "skilltree" ? renderSkillTree() : view === "lesson" ? renderLessonView() : renderResultView()}
