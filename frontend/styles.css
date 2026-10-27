@@ -293,3 +293,309 @@ body {
   .glass-navbar { padding: 1rem 1.5rem; }
   main { padding-top: 20px; padding-left: 1.5rem; padding-right: 1.5rem; }
 }
+
+/* ========== Molekül-Baukasten Styles ========== */
+.molecule-builder-container {
+  display: flex;
+  flex-direction: column;
+  gap: 1.5rem;
+  align-items: center;
+}
+
+.molecule-canvas-wrapper {
+  position: relative;
+  width: 100%;
+  max-width: 700px;
+  height: 400px;
+  background: #fdfaf5;
+  border: 3px dashed #fde6ca;
+  border-radius: 1.5rem;
+  overflow: hidden;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.06);
+}
+
+.molecule-svg {
+  width: 100%;
+  height: 100%;
+  display: block;
+  cursor: crosshair;
+}
+
+.grid-pattern {
+  opacity: 0.3;
+}
+
+.atom-node {
+  cursor: grab;
+  transition: all 0.2s ease;
+}
+
+.atom-node:active {
+  cursor: grabbing;
+  transform: scale(1.1);
+}
+
+.atom-node.selected {
+  stroke: #f59e0b;
+  stroke-width: 4;
+  filter: drop-shadow(0 0 8px rgba(245, 158, 11, 0.6));
+}
+
+.atom-node.connected {
+  stroke: #10b981;
+  stroke-width: 3;
+}
+
+.bond-line {
+  stroke: #64748b;
+  stroke-width: 6;
+  stroke-linecap: round;
+  fill: none;
+  transition: stroke 0.2s ease;
+}
+
+.bond-line.selected {
+  stroke: #f59e0b;
+}
+
+.bond-line.hover {
+  stroke: #fbbf24;
+}
+
+.atom-label {
+  pointer-events: none;
+  user-select: none;
+  font-weight: 800;
+  font-size: 1rem;
+  text-anchor: middle;
+  dominant-baseline: central;
+}
+
+.tooltip {
+  position: absolute;
+  background: rgba(30, 41, 59, 0.9);
+  color: white;
+  padding: 0.5rem 0.75rem;
+  border-radius: 0.5rem;
+  font-size: 0.875rem;
+  font-weight: 500;
+  pointer-events: none;
+  opacity: 0;
+  transition: opacity 0.2s ease;
+  z-index: 50;
+  white-space: nowrap;
+}
+
+.tooltip.visible {
+  opacity: 1;
+}
+
+/* Atom palette */
+.atom-palette {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: justify-center;
+  margin-bottom: 1rem;
+}
+
+.atom-palette-item {
+  width: 56px;
+  height: 56px;
+  border-radius: 1rem;
+  border: 2px solid #fde6ca;
+  background: #ffffff;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: grab;
+  transition: all 0.2s ease;
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.08);
+  font-size: 0.75rem;
+  text-align: center;
+}
+
+.atom-palette-item:active {
+  cursor: grabbing;
+  transform: scale(0.95);
+}
+
+.atom-palette-item:hover {
+  border-color: #f59e0b;
+  transform: translateY(-2px);
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.2);
+}
+
+.atom-palette-item.selected {
+  border-color: #f59e0b;
+  background: #fffbeb;
+  box-shadow: 0 0 0 4px rgba(245, 158, 11, 0.15);
+}
+
+.atom-palette-symbol {
+  font-weight: 800;
+  font-size: 1.25rem;
+  margin-bottom: 0.25rem;
+}
+
+.atom-palette-name {
+  font-size: 0.625rem;
+  color: #64748b;
+  font-weight: 500;
+}
+
+/* Controls */
+.builder-controls {
+  display: flex;
+  gap: 0.75rem;
+  flex-wrap: wrap;
+  justify-content: center;
+  margin-top: 1rem;
+}
+
+.btn-builder {
+  padding: 0.75rem 1.5rem;
+  border-radius: 1rem;
+  border: none;
+  font-weight: 700;
+  font-size: 0.9375rem;
+  cursor: pointer;
+  transition: all 0.2s ease;
+  display: flex;
+  align-items: center;
+  gap: 0.5rem;
+}
+
+.btn-builder:active {
+  transform: scale(0.97);
+}
+
+.btn-add-atom {
+  background: #ffffff;
+  border: 2px solid #fde6ca;
+  color: #92400e;
+}
+
+.btn-add-atom:hover {
+  border-color: #f59e0b;
+  background: #fffbeb;
+}
+
+.btn-remove {
+  background: #ffffff;
+  border: 2px solid #fee2e2;
+  color: #991b1b;
+}
+
+.btn-remove:hover {
+  border-color: #ef4444;
+  background: #fef2f2;
+}
+
+.btn-check {
+  background: linear-gradient(135deg, #f59e0b, #fbbf24);
+  color: white;
+  box-shadow: 0 4px 12px rgba(245, 158, 11, 0.3);
+}
+
+.btn-check:hover {
+  transform: translateY(-1px);
+  box-shadow: 0 6px 16px rgba(245, 158, 11, 0.4);
+}
+
+.btn-check:disabled {
+  opacity: 0.5;
+  cursor: not-allowed;
+  transform: none;
+}
+
+.btn-clear {
+  background: #ffffff;
+  border: 2px solid #fde6ca;
+  color: #64748b;
+}
+
+.btn-clear:hover {
+  border-color: #cbd5e1;
+  background: #f8fafc;
+}
+
+/* Difficulty badge */
+.difficulty-badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.5rem;
+  padding: 0.5rem 1rem;
+  border-radius: 2rem;
+  font-size: 0.875rem;
+  font-weight: 700;
+  text-transform: uppercase;
+  letter-spacing: 0.05em;
+}
+
+.difficulty-easy {
+  background: #d1fae5;
+  color: #065f46;
+}
+
+.difficulty-medium {
+  background: #fef3c7;
+  color: #92400e;
+}
+
+.difficulty-hard {
+  background: #fee2e2;
+  color: #991b1b;
+}
+
+/* Validation feedback */
+.validation-feedback {
+  margin-top: 1rem;
+  padding: 1rem 1.5rem;
+  border-radius: 1rem;
+  display: flex;
+  align-items: center;
+  gap: 1rem;
+  animation: slideIn 0.3s ease-out;
+}
+
+.validation-feedback.hidden {
+  display: none;
+}
+
+.validation-feedback.correct {
+  background: #d1fae5;
+  border: 2px solid #10b981;
+  color: #065f46;
+}
+
+.validation-feedback.incorrect {
+  background: #fee2e2;
+  border: 2px solid #ef4444;
+  color: #991b1b;
+}
+
+.validation-icon {
+  font-size: 1.5rem;
+}
+
+.validation-message {
+  font-weight: 600;
+  font-size: 0.9375rem;
+}
+
+@keyframes slideIn {
+  from { opacity: 0; transform: translateY(-10px); }
+  to { opacity: 1; transform: translateY(0); }
+}
+
+/* Responsive */
+@media (max-width: 640px) {
+  .molecule-canvas-wrapper {
+    height: 300px;
+  }
+  .atom-palette-item {
+    width: 48px;
+    height: 48px;
+  }
+}
