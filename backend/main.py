@@ -1,21 +1,20 @@
 """
 ChemVibe Backend – Agentenbasierter Lektionen- & Aufgaben-Generator
-FastAPI + Appwrite + Zyte + LLM
+FastAPI + LangChain + Zyte + Appwrite
 
 Architektur (Agenten-Workflow):
-1. LLM plant das Scraping (entscheidet über URLs / Suchanfragen für ein Thema)
-2. Zyte holt die Rohdaten
-3. LLM strukturiert die Rohdaten in eine saubere JSON-Lektion
-   (title, category, theory, challenge mit Molekül-Puzzle)
-4. Appwrite speichert die Lektion als status: "draft"
+1. LangChain LLM plant das Scraping (welche URLs für ein Thema)
+2. Zyte API holt die Rohdaten
+3. LangChain LLM strukturiert die Rohdaten in eine JSON-Lektion
+   (title, category, theory, challenge mit Molekül-Puzzle für den React-Baukasten)
+4. Appwrite Python SDK speichert die Lektion als status: "draft"
 
-Alle API-Schlüssel und Endpunkte werden über os.getenv geladen.
+Alle API-Schlüssel und Konfigurationen über os.getenv().
 """
 
 import os
 import json
 import re
-import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
@@ -31,6 +30,11 @@ from appwrite.id import ID
 from appwrite.query import Query as AppwriteQuery
 import httpx
 
+# LangChain imports
+from langchain_openai import ChatOpenAI
+from langchain_core.messages import SystemMessage, HumanMessage
+from langchain_core.output_parsers import StrOutputParser
+
 # ---------------------------------------------------------------------------
 # Environment configuration
 # ---------------------------------------------------------------------------
@@ -44,7 +48,7 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY", "")
 ZYTE_API_URL = os.getenv("ZYTE_API_URL", "https://api.zyte.com/v1/extract")
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_API_URL = os.getenv("LLM_API_URL", "https://api.openai.com/v1/chat/completions")
+LLM_API_URL = os.getenv("LLM_API_URL", "https://api.openai.com/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 
 # ---------------------------------------------------------------------------
@@ -52,8 +56,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="ChemVibe Backend",
-    description="Agentenbasierter Lektionen- und Aufgaben-Generator für ChemVibe",
-    version="2.0.0",
+    description="Agentenbasierter Lektionen- und Aufgaben-Generator mit LangChain",
+    version="2.1.0",
 )
 
 app.add_middleware(
@@ -63,6 +67,24 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+# ---------------------------------------------------------------------------
+# LangChain LLM instance
+# ---------------------------------------------------------------------------
+def get_llm(temperature: float = 0.7) -> ChatOpenAI:
+    """Erstellt eine LangChain ChatOpenAI Instanz."""
+    if not LLM_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="LLM_API_KEY ist nicht konfiguriert",
+        )
+    return ChatOpenAI(
+        model=LLM_MODEL,
+        temperature=temperature,
+        openai_api_key=LLM_API_KEY,
+        base_url=LLM_API_URL,
+    )
+
 
 # ---------------------------------------------------------------------------
 # Pydantic models
@@ -114,46 +136,15 @@ def get_databases() -> Databases:
 
 
 # ---------------------------------------------------------------------------
-# LLM helper
-# ---------------------------------------------------------------------------
-async def llm_chat(messages: List[Dict[str, str]], temperature: float = 0.7) -> str:
-    """Sendet eine Nachricht an das LLM und gibt den Textinhalt zurück."""
-    if not LLM_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="LLM_API_KEY ist nicht konfiguriert",
-        )
-
-    headers = {
-        "Authorization": f"Bearer {LLM_API_KEY}",
-        "Content-Type": "application/json",
-    }
-    payload = {
-        "model": LLM_MODEL,
-        "messages": messages,
-        "temperature": temperature,
-    }
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        response = await client.post(LLM_API_URL, headers=headers, json=payload)
-        if response.status_code != 200:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM-Fehler: {response.status_code} {response.text}",
-            )
-        data = response.json()
-        return data["choices"][0]["message"]["content"]
-
-
-# ---------------------------------------------------------------------------
-# Schritt 1: LLM plant das Scraping
+# Schritt 1: LangChain LLM plant das Scraping
 # ---------------------------------------------------------------------------
 async def plan_scraping(topic: str) -> List[str]:
     """
-    Das LLM entscheidet, welche URLs oder Suchanfragen über Zyte ausgeführt
-    werden sollen, um präzise chemische Daten zum Thema zu erhalten.
+    Das LangChain LLM entscheidet, welche URLs über Zyte abgerufen werden sollen.
     Gibt eine Liste von URLs zurück.
     """
+    llm = get_llm(temperature=0.3)
+
     system_prompt = """
 Du bist ein erfahrener Chemie-Rechercheur. Gegeben ein Thema aus der Organischen Chemie,
 entscheide du, welche Webseiten (URLs) am besten geeignet sind, um verlässliche,
@@ -168,13 +159,18 @@ Keine Erklärungen, kein Markdown, nur das JSON-Array.
 
     user_prompt = f"Thema: {topic}"
 
-    content = await llm_chat(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.3,
-    )
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        chain = llm | StrOutputParser()
+        content = chain.invoke(messages)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LangChain LLM-Fehler bei der Planung: {str(exc)}",
+        )
 
     # JSON-Array aus der Antwort extrahieren
     try:
@@ -184,17 +180,17 @@ Keine Erklärungen, kein Markdown, nur das JSON-Array.
     except (json.JSONDecodeError, TypeError):
         pass
 
-    # Fallback: versuche, URLs aus dem Text zu extrahieren
+    # Fallback: URLs aus dem Text extrahieren
     urls = re.findall(r'https?://[^\s"\']+', content)
     if urls:
         return urls
 
-    # Letzter Fallback: Wikipedia-Suche
+    # Letzter Fallback: Wikipedia
     return [f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"]
 
 
 # ---------------------------------------------------------------------------
-# Schritt 2: Zyte Daten holen
+# Schritt 2: Zyte Daten holen (httpx, da LangChain kein natives Zyte-Tool hat)
 # ---------------------------------------------------------------------------
 async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
     """
@@ -211,7 +207,6 @@ async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
     async with httpx.AsyncClient(timeout=60.0) as client:
         for url in urls:
             try:
-                # Zyte API-Aufruf (Basic Auth mit API Key)
                 response = await client.post(
                     ZYTE_API_URL,
                     auth=(ZYTE_API_KEY, ""),
@@ -247,23 +242,24 @@ async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
 
 
 # ---------------------------------------------------------------------------
-# Schritt 3: LLM strukturiert in JSON-Lektion
+# Schritt 3: LangChain LLM strukturiert in JSON-Lektion
 # ---------------------------------------------------------------------------
 async def structure_lesson(
     topic: str, raw_data: List[Dict[str, Any]], difficulty: str
 ) -> LessonStructure:
     """
-    Das LLM analysiert die gescrapten Rohdaten und generiert eine strukturierte
-    JSON-Lektion mit title, category, theory und challenge (Molekül-Puzzle).
+    Das LangChain LLM analysiert die gescrapten Rohdaten und generiert eine
+    strukturierte JSON-Lektion mit title, category, theory und challenge
+    (Molekül-Puzzle für den React-Baukasten).
     """
+    llm = get_llm(temperature=0.7)
 
-    # Rohdaten für den Prompt zusammenfassen (gekürzt, um Token-Limit zu respektieren)
+    # Rohdaten für den Prompt zusammenfassen (gekürzt)
     raw_summary = ""
     for item in raw_data:
         if item["status"] == "success":
             raw_summary += f"\n--- Quelle: {item['url']} ---\n"
             data = item["data"]
-            # Versuche, Text-Inhalte zu extrahieren
             if isinstance(data, dict):
                 for key in ("text", "content", "title", "description", "body"):
                     if key in data and isinstance(data[key], str):
@@ -322,20 +318,23 @@ Gesammelte Rohdaten:
 {raw_summary[:6000]}
 """.strip()
 
-    content = await llm_chat(
-        [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        temperature=0.7,
-    )
+    try:
+        messages = [
+            SystemMessage(content=system_prompt),
+            HumanMessage(content=user_prompt),
+        ]
+        chain = llm | StrOutputParser()
+        content = chain.invoke(messages)
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LangChain LLM-Fehler bei der Strukturierung: {str(exc)}",
+        )
 
     # JSON aus der LLM-Antwort extrahieren
     try:
-        # Versuche direkt zu parsen
         lesson_data = json.loads(content)
     except json.JSONDecodeError:
-        # Versuche, JSON-Block aus Markdown zu extrahieren
         match = re.search(r"\{.*\}", content, re.DOTALL)
         if match:
             try:
@@ -343,12 +342,12 @@ Gesammelte Rohdaten:
             except json.JSONDecodeError:
                 raise HTTPException(
                     status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                    detail="LLM hat kein valides JSON zurückgegeben",
+                    detail="LangChain LLM hat kein valides JSON zurückgegeben",
                 )
         else:
             raise HTTPException(
                 status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail="LLM hat kein valides JSON zurückgegeben",
+                detail="LangChain LLM hat kein valides JSON zurückgegeben",
             )
 
     return LessonStructure(**lesson_data)
@@ -403,8 +402,8 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
 async def root():
     return {
         "service": "ChemVibe Backend",
-        "version": "2.0.0",
-        "workflow": "agent-based lesson generator (LLM plan → Zyte → LLM structure → Appwrite draft)",
+        "version": "2.1.0",
+        "workflow": "agent-based lesson generator (LangChain plan → Zyte → LangChain structure → Appwrite draft)",
         "endpoints": [
             "POST /generate-agent-lesson",
             "GET /lessons",
@@ -418,12 +417,12 @@ async def root():
 @app.post("/generate-agent-lesson", response_model=LessonResponse, status_code=status.HTTP_201_CREATED)
 async def generate_agent_lesson(request: GenerateLessonRequest):
     """
-    Agentenbasierter Lektions-Generator.
+    Agentenbasierter Lektions-Generator mit LangChain.
 
     Workflow:
-    1. LLM plant das Scraping (welche URLs für das Thema?)
+    1. LangChain LLM plant das Scraping (welche URLs für das Thema?)
     2. Zyte holt die Rohdaten von den URLs
-    3. LLM strukturiert die Rohdaten in eine JSON-Lektion (title, category, theory, challenge)
+    3. LangChain LLM strukturiert die Rohdaten in eine JSON-Lektion
     4. Speichern in Appwrite als status: "draft"
     """
     topic = request.topic.strip()
@@ -433,13 +432,13 @@ async def generate_agent_lesson(request: GenerateLessonRequest):
             detail="Topic darf nicht leer sein",
         )
 
-    # Schritt 1: LLM plant das Scraping
+    # Schritt 1: LangChain LLM plant das Scraping
     urls = await plan_scraping(topic)
 
     # Schritt 2: Zyte holt die Daten
     raw_data = await fetch_with_zyte(urls)
 
-    # Schritt 3: LLM strukturiert in JSON-Lektion
+    # Schritt 3: LangChain LLM strukturiert in JSON-Lektion
     lesson = await structure_lesson(topic, raw_data, request.difficulty)
 
     # Schritt 4: In Appwrite als Draft speichern
