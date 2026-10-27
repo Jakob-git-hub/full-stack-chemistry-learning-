@@ -1,0 +1,191 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8" />
+  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+  <title>ChemVibe – Chemie lernen mit Gefühl</title>
+  <script src="https://cdn.tailwindcss.com"></script>
+  <script src="https://cdn.jsdelivr.net/npm/appwrite@10"></script>
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Plus+Jakarta+Sans:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+  <link rel="stylesheet" href="styles.css" />
+</head>
+<body class="bg-cream text-slate-800 antialiased selection:bg-amber-200">
+
+  <!-- Navbar -->
+  <nav class="fixed top-0 left-0 right-0 z-50 glass-navbar px-6 py-4">
+    <div class="max-w-7xl mx-auto flex items-center justify-between">
+      <div class="flex items-center gap-2">
+        <div class="w-8 h-8 rounded-xl bg-amber-200 flex items-center justify-center text-amber-700 font-bold text-lg shadow-sm">
+          C
+        </div>
+        <span class="font-bold text-xl tracking-tight text-slate-800">ChemVibe</span>
+      </div>
+      <div class="hidden md:flex items-center gap-6">
+        <a href="#" onclick="app.showHome()" class="text-slate-600 hover:text-amber-600 font-medium transition">Start</a>
+        <a href="#" onclick="app.showDashboard()" class="text-slate-600 hover:text-amber-600 font-medium transition">Lektionen</a>
+        <a href="#" onclick="app.showHome()" class="px-4 py-2 rounded-full bg-amber-600 text-white font-medium shadow-md hover:bg-amber-700 transition">Jetzt starten</a>
+      </div>
+      <button class="md:hidden text-slate-600" onclick="app.toggleMobileMenu()">
+        <svg class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16"></path></svg>
+      </button>
+    </div>
+  </nav>
+
+  <!-- Mobile menu -->
+  <div id="mobile-menu" class="hidden md:hidden glass-card p-4 mt-12 rounded-2xl border border-amber-100 mx-6 shadow-xl">
+    <a href="#" onclick="app.showHome(); app.toggleMobileMenu()" class="block py-3 text-slate-600 hover:text-amber-600 font-medium">Start</a>
+    <a href="#" onclick="app.showDashboard(); app.toggleMobileMenu()" class="block py-3 text-slate-600 hover:text-amber-600 font-medium">Lektionen</a>
+  </div>
+
+  <!-- Hero / Landing -->
+  <section id="home" class="pt-32 pb-20 px-6">
+    <div class="max-w-7xl mx-auto">
+      <div class="grid lg:grid-cols-2 gap-12 items-center">
+        <div>
+          <span class="inline-block px-4 py-1.5 rounded-full bg-amber-100 text-amber-700 text-sm font-medium mb-6">Willkommen bei ChemVibe</span>
+          <h1 class="text-5xl lg:text-6xl font-bold text-slate-800 leading-tight mb-6">
+            Chemie verstehen.<br><span class="text-amber-600">Mit Freude lernen.</span>
+          </h1>
+          <p class="text-lg text-slate-600 mb-8 max-w-lg leading-relaxed">
+            Entdecke interaktive Chemie-Lektionen, die wirklich Spaß machen. Von den Grundlagen des Periodensystems bis zu organischen Reaktionen – wir begleiten dich Schritt für Schritt.
+          </p>
+          <div class="flex flex-col sm:flex-row gap-4">
+            <button onclick="app.showDashboard()" class="px-8 py-4 rounded-2xl bg-amber-600 text-white font-semibold shadow-lg hover:bg-amber-700 transform hover:-translate-y-1 transition">Lektionen entdecken</button>
+            <button onclick="app.showHome()" class="px-8 py-4 rounded-2xl bg-white text-slate-700 font-semibold border border-amber-200 shadow-md hover:bg-amber-50 transform hover:-translate-y-1 transition">Über uns</button>
+          </div>
+        </div>
+        <div class="relative">
+          <div class="absolute -inset-1 bg-gradient-to-r from-amber-300 to-rose-300 rounded-3xl blur opacity-30"></div>
+          <div class="relative glass-card p-8 rounded-3xl border border-amber-100 shadow-2xl">
+            <div class="grid grid-cols-2 gap-4 mb-6">
+              <div class="p-4 rounded-2xl bg-amber-50 text-center">
+                <div class="text-2xl font-bold text-amber-700">12+</div>
+                <div class="text-xs text-slate-500">Lektionen</div>
+              </div>
+              <div class="p-4 rounded-2xl bg-rose-50 text-center">
+                <div class="text-2xl font-bold text-rose-700">5</div>
+                <div class="text-xs text-slate-500">Kategorien</div>
+              </div>
+              <div class="p-4 rounded-2xl bg-indigo-50 text-center">
+                <div class="text-2xl font-bold text-indigo-700">∞</div>
+                <div class="text-xs text-slate-500">Quiz-Fragen</div>
+              </div>
+              <div class="p-4 rounded-2xl bg-emerald-50 text-center">
+                <div class="text-2xl font-bold text-emerald-700">100%</div>
+                <div class="text-xs text-slate-500">Kostenlos</div>
+              </div>
+            </div>
+            <div class="h-64 bg-gradient-to-br from-amber-100 to-rose-100 rounded-2xl flex items-center justify-center relative overflow-hidden">
+              <div class="absolute inset-0 bg-[url('https://images.unsplash.com/photo-1555125067-9e3ba0d1d4fe?ixlib=rb-4.0.3&auto=format&fit=crop&w=600&q=80')] bg-cover bg-center opacity-40"></div>
+              <div class="relative z-10 text-center">
+                <div class="w-16 h-16 rounded-full bg-white/80 backdrop-blur flex items-center justify-center mx-auto mb-4 shadow-lg">
+                  <svg class="w-8 h-8 text-amber-600" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M13 10V3L4 14h7v7l9-11h-7z"></path></svg>
+                </div>
+                <div class="text-slate-600">Dein Lernbegleiter</div>
+              </div>
+            </div>
+          </div>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <!-- Dashboard / Lektionen-Übersicht -->
+  <section id="dashboard" class="hidden pt-32 pb-20 px-6">
+    <div class="max-w-7xl mx-auto">
+      <div class="flex flex-col md:flex-row justify-between items-end mb-10 gap-4">
+        <div>
+          <h2 class="text-3xl font-bold text-slate-800 mb-2">Alle Lektionen</h2>
+          <p class="text-slate-500">Wähle ein Thema und starte dein nächstes Abenteuer.</p>
+        </div>
+        <div class="flex items-center gap-2">
+          <span class="text-sm text-slate-500">Filter:</span>
+          <select class="px-3 py-2 rounded-xl border border-amber-200 bg-white text-sm focus:outline-none focus:ring-2 focus:ring-amber-300">
+            <option>Alle Kategorien</option>
+            <option>Anorganische Chemie</option>
+            <option>Organische Chemie</option>
+            <option>Physikalische Chemie</option>
+          </select>
+        </div>
+      </div>
+
+      <!-- Skeleton loader -->
+      <div id="skeleton-loader" class="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6">
+        <div class="skeleton-card animate-pulse">
+          <div class="h-48 rounded-2xl bg-amber-100 mb-4"></div>
+          <div class="h-4 rounded-full bg-amber-200 mb-2 w-3/4"></div>
+          <div class="h-3 rounded-full bg-amber-200 mb-1 w-1/2"></div>
+          <div class="h-3 rounded-full bg-amber-200 w-1/3"></div>
+        </div>
+        <div class="skeleton-card animate-pulse">
+          <div class="h-48 rounded-2xl bg-rose-100 mb-4"></div>
+          <div class="h-4 rounded-full bg-rose-200 mb-2 w-3/4"></div>
+          <div class="h-3 rounded-full bg-rose-200 mb-1 w-1/2"></div>
+          <div class="h-3 rounded-full bg-rose-200 w-1/3"></div>
+        </div>
+        <div class="skeleton-card animate-pulse">
+          <div class="h-48 rounded-2xl bg-indigo-100 mb-4"></div>
+          <div class="h-4 rounded-full bg-indigo-200 mb-2 w-3/4"></div>
+          <div class="h-3 rounded-full bg-indigo-200 mb-1 w-1/2"></div>
+          <div class="h-3 rounded-full bg-indigo-200 w-1/3"></div>
+        </div>
+      </div>
+
+      <!-- Lessons grid (populated by JS) -->
+      <div id="lessons-grid" class="hidden grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-6"></div>
+
+      <!-- Empty state -->
+      <div id="empty-state" class="hidden text-center py-20">
+        <div class="w-16 h-16 rounded-full bg-amber-100 flex items-center justify-center mx-auto mb-4">
+          <svg class="w-8 h-8 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="1" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+        </div>
+        <h3 class="text-xl font-bold text-slate-800 mb-2">Keine Lektionen gefunden</h3>
+        <p class="text-slate-500">Versuche es mit einer anderen Kategorie.</p>
+      </div>
+    </div>
+  </section>
+
+  <!-- Lesson / Quiz view -->
+  <section id="lesson-view" class="hidden pt-32 pb-20 px-6">
+    <div class="max-w-3xl mx-auto">
+      <button onclick="app.showDashboard()" class="inline-flex items-center gap-2 text-slate-500 hover:text-amber-600 font-medium mb-8 transition">
+        <svg class="w-5 h-5" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M10 19l-7-7m0 0l7-7m-7 7h18"></path></svg>
+        Zurück zu Lektionen
+      </button>
+
+      <div class="glass-card rounded-3xl p-8 md:p-12 border border-amber-100 shadow-xl">
+        <div class="flex items-center gap-3 mb-6">
+          <span id="lesson-category" class="px-3 py-1 rounded-full bg-amber-100 text-amber-700 text-xs font-semibold uppercase tracking-wider">Kategorie</span>
+          <span class="text-xs text-slate-400">•</span>
+          <span id="lesson-reading-time" class="text-sm text-slate-500">5 min Lesezeit</span>
+        </div>
+        <h1 id="lesson-title" class="text-3xl font-bold text-slate-800 mb-6">Lektionstitel</h1>
+        <div id="lesson-content" class="prose prose-slate max-w-none text-slate-700 leading-relaxed mb-8">
+          <!-- Lesson content injected here -->
+        </div>
+
+        <!-- Quiz -->
+        <div id="quiz-section" class="mt-12 pt-8 border-t border-amber-100">
+          <h2 class="text-xl font-bold text-slate-800 mb-6 flex items-center gap-2">
+            <svg class="w-5 h-5 text-amber-500" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M9 12h6m-6 4h6m2 5H7a2 2 0 01-2-2V5a2 2 0 012-2h5.586a1 1 0 01.707.293l5.414 5.414a1 1 0 01.293.707V19a2 2 0 01-2 2z"></path></svg>
+            Wissen prüfen
+          </h2>
+          <div id="quiz-container" class="space-y-4">
+            <!-- Quiz questions injected here -->
+          </div>
+          <div id="quiz-result" class="hidden mt-6 p-6 rounded-2xl text-center">
+            <!-- Result injected here -->
+          </div>
+          <button id="quiz-submit" class="hidden mt-8 px-8 py-3 rounded-2xl bg-amber-600 text-white font-semibold shadow-lg hover:bg-amber-700 transform hover:-translate-y-1 transition">
+            Antworten auswerten
+          </button>
+        </div>
+      </div>
+    </div>
+  </section>
+
+  <script src="app.js"></script>
+</body>
+</html>
