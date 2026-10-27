@@ -1,23 +1,28 @@
 """
-ChemVibe Backend – Gamified Organic Chemistry Learning Platform
+ChemVibe Backend – Agentenbasierter Lektionen- & Aufgaben-Generator
 FastAPI + Appwrite + Zyte + LLM
 
-Architecture:
-- FastAPI application with async endpoints
-- Zyte API for web scraping educational chemistry content
-- LLM (OpenAI-compatible) for generating structured lessons
-- Appwrite Python SDK for database persistence with draft/publish workflow
+Architektur (Agenten-Workflow):
+1. LLM plant das Scraping (entscheidet über URLs / Suchanfragen für ein Thema)
+2. Zyte holt die Rohdaten
+3. LLM strukturiert die Rohdaten in eine saubere JSON-Lektion
+   (title, category, theory, challenge mit Molekül-Puzzle)
+4. Appwrite speichert die Lektion als status: "draft"
 
-All API keys and endpoints are loaded from environment variables via os.getenv.
+Alle API-Schlüssel und Endpunkte werden über os.getenv geladen.
 """
 
 import os
 import json
+import re
 import uuid
 from datetime import datetime, timezone
 from typing import Optional, List, Dict, Any
 
-from fastapi import FastAPI, HTTPException, BackgroundTasks, status
+from dotenv import load_dotenv
+load_dotenv()
+
+from fastapi import FastAPI, HTTPException, status
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, Field
 from appwrite.client import Client
@@ -47,8 +52,8 @@ LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
 # ---------------------------------------------------------------------------
 app = FastAPI(
     title="ChemVibe Backend",
-    description="Gamified organic chemistry learning platform backend",
-    version="1.0.0",
+    description="Agentenbasierter Lektionen- und Aufgaben-Generator für ChemVibe",
+    version="2.0.0",
 )
 
 app.add_middleware(
@@ -59,53 +64,44 @@ app.add_middleware(
     allow_headers=["*"],
 )
 
-
 # ---------------------------------------------------------------------------
 # Pydantic models
 # ---------------------------------------------------------------------------
-class LessonGenerateRequest(BaseModel):
-    topic: Optional[str] = Field(None, description="Optional topic to generate a lesson about")
-    source_url: Optional[str] = Field(None, description="Optional URL to scrape content from")
-
-
-class LessonRequest(BaseModel):
-    topic: str = Field(..., min_length=1, max_length=200, description="Topic requested by admin")
-    priority: int = Field(1, ge=1, le=5, description="Priority of the request (1=lowest, 5=highest)")
+class GenerateLessonRequest(BaseModel):
+    topic: str = Field(..., description="Chemie-Thema, z.B. 'Nukleophile Substitution'")
+    difficulty: Optional[str] = Field("medium", description="easy | medium | hard")
 
 
 class LessonResponse(BaseModel):
     id: str
     title: str
+    category: str
     status: str
     created_at: str
 
 
-class LessonDetailResponse(BaseModel):
-    id: str
+class Challenge(BaseModel):
+    type: str = "molecule_builder"
+    question: str
+    difficulty: str
+    target_smiles: Optional[str] = None
+    target_atoms: Optional[List[Dict[str, Any]]] = None
+    target_bonds: Optional[int] = None
+    preplaced_atoms: Optional[List[Dict[str, Any]]] = None
+    palette_atoms: List[Dict[str, str]]
+
+
+class LessonStructure(BaseModel):
     title: str
     category: str
-    icon: str
-    order: int
-    reading_time: int
-    description: str
-    content: str
-    steps: List[Dict[str, Any]]
-    status: str
-    created_at: str
-    updated_at: str
-
-
-class PublishResponse(BaseModel):
-    message: str
-    id: str
-    status: str
+    theory: str
+    challenge: Challenge
 
 
 # ---------------------------------------------------------------------------
 # Appwrite client helper
 # ---------------------------------------------------------------------------
 def get_appwrite_client() -> Client:
-    """Initialize and return an authenticated Appwrite client."""
     client = Client()
     client.set_endpoint(APPWRITE_ENDPOINT)
     client.set_project(APPWRITE_PROJECT_ID)
@@ -114,284 +110,434 @@ def get_appwrite_client() -> Client:
 
 
 def get_databases() -> Databases:
-    """Return an authenticated Databases service instance."""
     return Databases(get_appwrite_client())
 
 
 # ---------------------------------------------------------------------------
-# Zyte scraping
+# LLM helper
 # ---------------------------------------------------------------------------
-async def scrape_with_zyte(url: str) -> Dict[str, Any]:
-    """
-    Scrape a URL using Zyte API and return extracted content.
-
-    Raises HTTPException if Zyte API key is missing or the request fails.
-    """
-    if not ZYTE_API_KEY:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="Zyte API key not configured. Set ZYTE_API_KEY environment variable.",
-        )
-
-    payload = {
-        "url": url,
-        "browserHtml": True,
-    }
-
-    async with httpx.AsyncClient(timeout=30.0) as client:
-        try:
-            response = await client.post(
-                ZYTE_API_URL,
-                auth=(ZYTE_API_KEY, ""),
-                json=payload,
-            )
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"Zyte API request failed: {str(exc)}",
-            )
-
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"Zyte API error: {response.status_code} {response.text}",
-        )
-
-    return response.json()
-
-
-# ---------------------------------------------------------------------------
-# LLM lesson generation
-# ---------------------------------------------------------------------------
-async def generate_lesson_with_llm(
-    topic: str, source_content: Optional[str] = None
-) -> Dict[str, Any]:
-    """
-    Use an LLM (OpenAI-compatible chat API) to generate a structured organic
-    chemistry lesson with flexible task types.
-
-    Returns a dictionary matching the lesson JSON schema.
-    """
+async def llm_chat(messages: List[Dict[str, str]], temperature: float = 0.7) -> str:
+    """Sendet eine Nachricht an das LLM und gibt den Textinhalt zurück."""
     if not LLM_API_KEY:
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail="LLM API key not configured. Set LLM_API_KEY environment variable.",
+            detail="LLM_API_KEY ist nicht konfiguriert",
         )
-
-    system_prompt = """
-Du bist ein erfahrener Chemie-Didaktik-Experte. Erstelle eine didaktisch wertvolle,
-gamifizierte Lektion über Organische Chemie für Schüler.
-
-Die Lektion muss im folgenden JSON-Format zurückgegeben werden (kein Markdown, nur reines JSON):
-
-{
-  "title": "Titel der Lektion",
-  "category": "Organische Chemie",
-  "icon": "🧪",
-  "order": 1,
-  "reading_time": 8,
-  "description": "Kurze Beschreibung der Lektion",
-  "content": "Ausführlicher Lektionstext in HTML",
-  "steps": [
-    {
-      "type": "info",
-      "info": {
-        "title": "Wusstest du?",
-        "content": "Interessanter Fakt oder Einführung"
-      }
-    },
-    {
-      "type": "multiple_choice",
-      "question": "Frage?",
-      "options": ["A", "B", "C", "D"],
-      "correctAnswerIndex": 0
-    },
-    {
-      "type": "drag_drop",
-      "question": "Ordne zu:",
-      "items": [
-        {"label": "Begriff 1", "value": "wert1"},
-        {"label": "Begriff 2", "value": "wert2"}
-      ],
-      "targets": [
-        {"id": "t1", "label": "Ziel 1", "correctValue": "wert1"},
-        {"id": "t2", "label": "Ziel 2", "correctValue": "wert2"}
-      ]
-    },
-    {
-      "type": "matching",
-      "question": "Ordne die Paare:",
-      "pairs": [
-        {"left": "Ethanol", "right": "C₂H₅OH"},
-        {"left": "Methanol", "right": "CH₃OH"}
-      ]
-    },
-    {
-      "type": "molecule",
-      "question": "Welches Molekül ist das?",
-      "atoms": [
-        {"type": "carbon", "symbol": "C"},
-        {"type": "hydrogen", "symbol": "H"}
-      ],
-      "options": ["CH₄", "C₂H₆", "C₃H₈"],
-      "correctAnswerIndex": 0
-    }
-  ]
-}
-
-Wichtige Regeln:
-- Die Schritte müssen abwechselnd Info-Häppchen und interaktive Challenges sein.
-- Nutze verschiedene Aufgabentypen (multiple_choice, drag_drop, matching, molecule).
-- Der Inhalt muss didaktisch wertvoll und schülerfreundlich sein.
-- Gib NUR reines JSON zurück, keine Erklärungen drumherum.
-"""
-
-    user_prompt = f"Thema: {topic}"
-    if source_content:
-        user_prompt += f"\n\nQuelleninhalt:\n{source_content[:4000]}"
-
-    payload = {
-        "model": LLM_MODEL,
-        "messages": [
-            {"role": "system", "content": system_prompt},
-            {"role": "user", "content": user_prompt},
-        ],
-        "temperature": 0.7,
-        "max_tokens": 3000,
-    }
 
     headers = {
         "Authorization": f"Bearer {LLM_API_KEY}",
         "Content-Type": "application/json",
     }
-
-    async with httpx.AsyncClient(timeout=60.0) as client:
-        try:
-            response = await client.post(LLM_API_URL, json=payload, headers=headers)
-        except httpx.RequestError as exc:
-            raise HTTPException(
-                status_code=status.HTTP_502_BAD_GATEWAY,
-                detail=f"LLM API request failed: {str(exc)}",
-            )
-
-    if response.status_code != 200:
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LLM API error: {response.status_code} {response.text}",
-        )
-
-    result = response.json()
-    content = result["choices"][0]["message"]["content"]
-
-    # Parse JSON from LLM response (handle markdown code fences)
-    try:
-        if "```json" in content:
-            content = content.split("```json")[1].split("```")[0]
-        elif "```" in content:
-            content = content.split("```")[1].split("```")[0]
-        lesson_data = json.loads(content.strip())
-    except json.JSONDecodeError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Failed to parse LLM response as JSON: {str(exc)}",
-        )
-
-    # Validate required fields
-    required_fields = ["title", "steps"]
-    for field in required_fields:
-        if field not in lesson_data:
-            raise HTTPException(
-                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                detail=f"LLM response missing required field: {field}",
-            )
-
-    return lesson_data
-
-
-# ---------------------------------------------------------------------------
-# Appwrite helpers
-# ---------------------------------------------------------------------------
-def save_lesson_to_appwrite(lesson_data: Dict[str, Any], status_value: str = "draft") -> str:
-    """
-    Save a lesson to Appwrite with the given status. Returns the document ID.
-
-    The lesson is stored with status='draft' by default, meaning it will not
-    appear in the public learning path until an admin publishes it.
-    """
-    databases = get_databases()
-
-    now = datetime.now(timezone.utc).isoformat()
-
-    document = {
-        "title": lesson_data.get("title", "Unbenannte Lektion"),
-        "category": lesson_data.get("category", "Organische Chemie"),
-        "icon": lesson_data.get("icon", "🧪"),
-        "order": lesson_data.get("order", 1),
-        "reading_time": lesson_data.get("reading_time", 5),
-        "description": lesson_data.get("description", ""),
-        "content": lesson_data.get("content", ""),
-        "steps": lesson_data.get("steps", []),
-        "status": status_value,
-        "created_at": now,
-        "updated_at": now,
+    payload = {
+        "model": LLM_MODEL,
+        "messages": messages,
+        "temperature": temperature,
     }
 
-    result = databases.create_document(
-        database_id=APPWRITE_DATABASE_ID,
-        collection_id=APPWRITE_COLLECTION_ID,
-        document_id=ID.unique(),
-        data=document,
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        response = await client.post(LLM_API_URL, headers=headers, json=payload)
+        if response.status_code != 200:
+            raise HTTPException(
+                status_code=status.HTTP_502_BAD_GATEWAY,
+                detail=f"LLM-Fehler: {response.status_code} {response.text}",
+            )
+        data = response.json()
+        return data["choices"][0]["message"]["content"]
+
+
+# ---------------------------------------------------------------------------
+# Schritt 1: LLM plant das Scraping
+# ---------------------------------------------------------------------------
+async def plan_scraping(topic: str) -> List[str]:
+    """
+    Das LLM entscheidet, welche URLs oder Suchanfragen über Zyte ausgeführt
+    werden sollen, um präzise chemische Daten zum Thema zu erhalten.
+    Gibt eine Liste von URLs zurück.
+    """
+    system_prompt = """
+Du bist ein erfahrener Chemie-Rechercheur. Gegeben ein Thema aus der Organischen Chemie,
+entscheide du, welche Webseiten (URLs) am besten geeignet sind, um verlässliche,
+strukturierte Informationen zu diesem Thema zu sammeln.
+
+Antworte ausschließlich mit einem JSON-Array von URL-Strings, z.B.:
+["https://en.wikipedia.org/wiki/Nucleophilic_substitution", "https://www.masterorganicchemistry.com/2017/12/04/sn2-reactions/"]
+
+Wähle seriöse Bildungsquellen (Wikipedia, MasterOrganicChemistry, ChemLibreTexts, university-Webseiten).
+Keine Erklärungen, kein Markdown, nur das JSON-Array.
+""".strip()
+
+    user_prompt = f"Thema: {topic}"
+
+    content = await llm_chat(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.3,
     )
-    return result["$id"]
+
+    # JSON-Array aus der Antwort extrahieren
+    try:
+        urls = json.loads(content)
+        if isinstance(urls, list) and all(isinstance(u, str) for u in urls):
+            return urls
+    except (json.JSONDecodeError, TypeError):
+        pass
+
+    # Fallback: versuche, URLs aus dem Text zu extrahieren
+    urls = re.findall(r'https?://[^\s"\']+', content)
+    if urls:
+        return urls
+
+    # Letzter Fallback: Wikipedia-Suche
+    return [f"https://en.wikipedia.org/wiki/{topic.replace(' ', '_')}"]
 
 
-def list_lessons(status_filter: Optional[str] = None) -> List[Dict[str, Any]]:
+# ---------------------------------------------------------------------------
+# Schritt 2: Zyte Daten holen
+# ---------------------------------------------------------------------------
+async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
     """
-    List lessons from Appwrite, optionally filtered by status.
-    Results are ordered by the 'order' field ascending.
+    Ruft die Zyte-Extraktions-API für jede URL auf und gibt die Rohdaten zurück.
     """
+    if not ZYTE_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="ZYTE_API_KEY ist nicht konfiguriert",
+        )
+
+    results: List[Dict[str, Any]] = []
+
+    async with httpx.AsyncClient(timeout=60.0) as client:
+        for url in urls:
+            try:
+                # Zyte API-Aufruf (Basic Auth mit API Key)
+                response = await client.post(
+                    ZYTE_API_URL,
+                    auth=(ZYTE_API_KEY, ""),
+                    json={"url": url},
+                )
+                if response.status_code == 200:
+                    data = response.json()
+                    results.append(
+                        {
+                            "url": url,
+                            "status": "success",
+                            "data": data,
+                        }
+                    )
+                else:
+                    results.append(
+                        {
+                            "url": url,
+                            "status": "error",
+                            "error": f"Zyte returned {response.status_code}: {response.text}",
+                        }
+                    )
+            except Exception as exc:
+                results.append(
+                    {
+                        "url": url,
+                        "status": "error",
+                        "error": str(exc),
+                    }
+                )
+
+    return results
+
+
+# ---------------------------------------------------------------------------
+# Schritt 3: LLM strukturiert in JSON-Lektion
+# ---------------------------------------------------------------------------
+async def structure_lesson(
+    topic: str, raw_data: List[Dict[str, Any]], difficulty: str
+) -> LessonStructure:
+    """
+    Das LLM analysiert die gescrapten Rohdaten und generiert eine strukturierte
+    JSON-Lektion mit title, category, theory und challenge (Molekül-Puzzle).
+    """
+
+    # Rohdaten für den Prompt zusammenfassen (gekürzt, um Token-Limit zu respektieren)
+    raw_summary = ""
+    for item in raw_data:
+        if item["status"] == "success":
+            raw_summary += f"\n--- Quelle: {item['url']} ---\n"
+            data = item["data"]
+            # Versuche, Text-Inhalte zu extrahieren
+            if isinstance(data, dict):
+                for key in ("text", "content", "title", "description", "body"):
+                    if key in data and isinstance(data[key], str):
+                        raw_summary += f"{key}: {data[key][:1500]}\n"
+            raw_summary += "\n"
+        else:
+            raw_summary += f"\n--- Quelle: {item['url']} (Fehler: {item.get('error', 'unbekannt')}) ---\n"
+
+    system_prompt = """
+Du bist ein erfahrener Chemie-Didaktik-Experte und erstellst Lektionen für eine
+gamifizierte Lernplattform im Duolingo-Stil.
+
+Gegeben sind gescrapten Rohdaten zu einem Chemie-Thema. Erstelle daraus eine
+strukturierte Lektion im folgenden JSON-Format:
+
+{
+  "title": "Titel der Lektion",
+  "category": "z.B. Reaktionsmechanismen",
+  "theory": "Kurze, verständliche Erklärung im Duolingo-Stil (freundlich, motivierend, einfach)",
+  "challenge": {
+    "type": "molecule_builder",
+    "question": "Die konkrete Fragestellung für den Nutzer (z.B. 'Baue das Produkt einer nukleophilen Substitution von Chlormethan mit Hydroxid-Ion')",
+    "difficulty": "easy | medium | hard",
+    "target_smiles": "SMILES-String der Zielstruktur, z.B. 'CO' für Methanol",
+    "target_atoms": [
+      {"type": "carbon", "x": 200, "y": 200},
+      {"type": "oxygen", "x": 280, "y": 200},
+      {"type": "hydrogen", "x": 140, "y": 160}
+    ],
+    "target_bonds": 5,
+    "preplaced_atoms": [],
+    "palette_atoms": [
+      {"type": "carbon", "symbol": "C", "name": "Kohlenstoff"},
+      {"type": "hydrogen", "symbol": "H", "name": "Wasserstoff"},
+      {"type": "oxygen", "symbol": "O", "name": "Sauerstoff"}
+    ]
+  }
+}
+
+Wichtige Regeln:
+- theory: Maximal 3-4 Sätze, einfach und motivierend geschrieben.
+- challenge: Ein konkretes Molekül-Puzzle, das zum Thema passt.
+- target_smiles: Ein valider SMILES-String für die Zielmolekül-Struktur.
+- target_atoms: Liste von Atomen mit Typ und Position (x, y im Canvas-Koordinatensystem).
+- target_bonds: Anzahl der Bindungen in der Zielstruktur.
+- preplaced_atoms: Atome, die bereits auf dem Canvas platziert sind (bei easy/medium).
+- palette_atoms: Verfügbare Atom-Typen für den Nutzer.
+- Antworte AUSSCHLIESSLICH mit dem JSON-Objekt, kein Markdown, kein Erklärtext.
+""".strip()
+
+    user_prompt = f"""
+Thema: {topic}
+Schwierigkeitsgrad: {difficulty}
+
+Gesammelte Rohdaten:
+{raw_summary[:6000]}
+""".strip()
+
+    content = await llm_chat(
+        [
+            {"role": "system", "content": system_prompt},
+            {"role": "user", "content": user_prompt},
+        ],
+        temperature=0.7,
+    )
+
+    # JSON aus der LLM-Antwort extrahieren
+    try:
+        # Versuche direkt zu parsen
+        lesson_data = json.loads(content)
+    except json.JSONDecodeError:
+        # Versuche, JSON-Block aus Markdown zu extrahieren
+        match = re.search(r"\{.*\}", content, re.DOTALL)
+        if match:
+            try:
+                lesson_data = json.loads(match.group(0))
+            except json.JSONDecodeError:
+                raise HTTPException(
+                    status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                    detail="LLM hat kein valides JSON zurückgegeben",
+                )
+        else:
+            raise HTTPException(
+                status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+                detail="LLM hat kein valides JSON zurückgegeben",
+            )
+
+    return LessonStructure(**lesson_data)
+
+
+# ---------------------------------------------------------------------------
+# Schritt 4: In Appwrite speichern (als Draft)
+# ---------------------------------------------------------------------------
+def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
+    """
+    Speichert die generierte Lektion in der Appwrite-Collection `lessons`
+    mit dem Status 'draft'. Gibt die Dokument-ID zurück.
+    """
+    if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Appwrite-Credentials sind nicht konfiguriert",
+        )
+
     databases = get_databases()
 
-    queries: List[Any] = [AppwriteQuery.orderAsc("order")]
+    document = {
+        "title": lesson.title,
+        "category": lesson.category,
+        "theory": lesson.theory,
+        "challenge": lesson.challenge.model_dump(),
+        "status": "draft",
+        "topic": topic,
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
+    }
+
+    try:
+        result = databases.create_document(
+            database_id=APPWRITE_DATABASE_ID,
+            collection_id=APPWRITE_COLLECTION_ID,
+            document_id=ID.unique(),
+            data=document,
+        )
+        return result["$id"]
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Appwrite-Fehler beim Speichern: {str(exc)}",
+        )
+
+
+# ---------------------------------------------------------------------------
+# API-Endpunkte
+# ---------------------------------------------------------------------------
+@app.get("/")
+async def root():
+    return {
+        "service": "ChemVibe Backend",
+        "version": "2.0.0",
+        "workflow": "agent-based lesson generator (LLM plan → Zyte → LLM structure → Appwrite draft)",
+        "endpoints": [
+            "POST /generate-agent-lesson",
+            "GET /lessons",
+            "GET /lessons/drafts",
+            "GET /lessons/{lesson_id}",
+            "POST /lessons/{lesson_id}/publish",
+        ],
+    }
+
+
+@app.post("/generate-agent-lesson", response_model=LessonResponse, status_code=status.HTTP_201_CREATED)
+async def generate_agent_lesson(request: GenerateLessonRequest):
+    """
+    Agentenbasierter Lektions-Generator.
+
+    Workflow:
+    1. LLM plant das Scraping (welche URLs für das Thema?)
+    2. Zyte holt die Rohdaten von den URLs
+    3. LLM strukturiert die Rohdaten in eine JSON-Lektion (title, category, theory, challenge)
+    4. Speichern in Appwrite als status: "draft"
+    """
+    topic = request.topic.strip()
+    if not topic:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Topic darf nicht leer sein",
+        )
+
+    # Schritt 1: LLM plant das Scraping
+    urls = await plan_scraping(topic)
+
+    # Schritt 2: Zyte holt die Daten
+    raw_data = await fetch_with_zyte(urls)
+
+    # Schritt 3: LLM strukturiert in JSON-Lektion
+    lesson = await structure_lesson(topic, raw_data, request.difficulty)
+
+    # Schritt 4: In Appwrite als Draft speichern
+    doc_id = save_lesson_to_appwrite(lesson, topic)
+
+    return LessonResponse(
+        id=doc_id,
+        title=lesson.title,
+        category=lesson.category,
+        status="draft",
+        created_at=datetime.now(timezone.utc).isoformat(),
+    )
+
+
+@app.get("/lessons", response_model=List[LessonResponse])
+async def list_lessons(status_filter: Optional[str] = None):
+    """Listet alle Lektionen auf, optional gefiltert nach Status."""
+    if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Appwrite-Credentials sind nicht konfiguriert",
+        )
+
+    databases = get_databases()
+
+    queries = []
     if status_filter:
         queries.append(AppwriteQuery.equal("status", status_filter))
 
-    result = databases.list_documents(
-        database_id=APPWRITE_DATABASE_ID,
-        collection_id=APPWRITE_COLLECTION_ID,
-        queries=queries,
-    )
-    return result["documents"]
-
-
-def get_lesson_by_id(lesson_id: str) -> Dict[str, Any]:
-    """
-    Retrieve a single lesson document from Appwrite by its ID.
-    Raises HTTPException 404 if not found.
-    """
-    databases = get_databases()
     try:
-        result = databases.get_document(
+        result = databases.list_documents(
+            database_id=APPWRITE_DATABASE_ID,
+            collection_id=APPWRITE_COLLECTION_ID,
+            queries=queries,
+        )
+        lessons = []
+        for doc in result["documents"]:
+            lessons.append(
+                LessonResponse(
+                    id=doc["$id"],
+                    title=doc.get("title", ""),
+                    category=doc.get("category", ""),
+                    status=doc.get("status", "draft"),
+                    created_at=doc.get("$createdAt", ""),
+                )
+            )
+        return lessons
+    except Exception as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Appwrite-Fehler: {str(exc)}",
+        )
+
+
+@app.get("/lessons/drafts", response_model=List[LessonResponse])
+async def list_drafts():
+    """Listet alle Lektionen mit Status 'draft' (für das Admin-Dashboard)."""
+    return await list_lessons(status_filter="draft")
+
+
+@app.get("/lessons/{lesson_id}")
+async def get_lesson(lesson_id: str):
+    """Gibt eine einzelne Lektion mit allen Details zurück."""
+    if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Appwrite-Credentials sind nicht konfiguriert",
+        )
+
+    databases = get_databases()
+
+    try:
+        doc = databases.get_document(
             database_id=APPWRITE_DATABASE_ID,
             collection_id=APPWRITE_COLLECTION_ID,
             document_id=lesson_id,
         )
-        return result
+        return doc
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Lesson not found: {str(exc)}",
+            detail=f"Lektion nicht gefunden: {str(exc)}",
         )
 
 
-def publish_lesson(lesson_id: str) -> Dict[str, Any]:
-    """
-    Publish a draft lesson by setting status to 'published'.
-    Returns the updated document.
-    """
+@app.post("/lessons/{lesson_id}/publish")
+async def publish_lesson(lesson_id: str):
+    """Setzt eine Lektion von 'draft' auf 'published' (öffentlich im Lernpfad)."""
+    if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail="Appwrite-Credentials sind nicht konfiguriert",
+        )
+
     databases = get_databases()
+
     try:
-        result = databases.update_document(
+        doc = databases.update_document(
             database_id=APPWRITE_DATABASE_ID,
             collection_id=APPWRITE_COLLECTION_ID,
             document_id=lesson_id,
@@ -400,261 +546,18 @@ def publish_lesson(lesson_id: str) -> Dict[str, Any]:
                 "updated_at": datetime.now(timezone.utc).isoformat(),
             },
         )
-        return result
+        return {
+            "id": doc["$id"],
+            "status": doc["status"],
+            "message": "Lektion veröffentlicht",
+        }
     except Exception as exc:
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Failed to publish lesson: {str(exc)}",
+            detail=f"Lektion nicht gefunden oder konnte nicht veröffentlicht werden: {str(exc)}",
         )
 
 
-# ---------------------------------------------------------------------------
-# Background task: full generation pipeline
-# ---------------------------------------------------------------------------
-async def generate_and_save_lesson(topic: str, source_url: Optional[str] = None) -> str:
-    """
-    Full pipeline: scrape (if URL provided), generate via LLM, save as draft to Appwrite.
-
-    Returns the Appwrite document ID of the created draft lesson.
-    """
-    source_content: Optional[str] = None
-
-    if source_url:
-        try:
-            scraped = await scrape_with_zyte(source_url)
-            source_content = (
-                scraped.get("browserHtml")
-                or scraped.get("content")
-                or scraped.get("text")
-                or ""
-            )
-        except Exception as exc:
-            # Log the error but continue – we can still generate from topic alone
-            print(f"[WARN] Zyte scrape failed for {source_url}: {exc}")
-
-    lesson_data = await generate_lesson_with_llm(topic, source_content)
-    doc_id = save_lesson_to_appwrite(lesson_data, status_value="draft")
-    print(f"[INFO] Lesson saved as draft: {doc_id} – topic: {topic}")
-    return doc_id
-
-
-# ---------------------------------------------------------------------------
-# API Endpoints
-# ---------------------------------------------------------------------------
-@app.get("/", tags=["General"])
-async def root():
-    """Health check and service information."""
-    return {
-        "service": "ChemVibe Backend",
-        "version": "1.0.0",
-        "status": "running",
-        "endpoints": {
-            "generate_lesson": "POST /generate-lesson",
-            "request_lesson": "POST /request-lesson",
-            "list_published": "GET /lessons",
-            "list_drafts": "GET /lessons/drafts",
-            "publish": "POST /lessons/{lesson_id}/publish",
-            "get_lesson": "GET /lessons/{lesson_id}",
-        },
-    }
-
-
-@app.get("/health", tags=["General"])
+@app.get("/health")
 async def health():
-    """Simple health check endpoint."""
-    return {"status": "healthy"}
-
-
-@app.post(
-    "/generate-lesson",
-    response_model=LessonResponse,
-    status_code=status.HTTP_202_ACCEPTED,
-    tags=["Lessons"],
-)
-async def generate_lesson(
-    request: LessonGenerateRequest, background_tasks: BackgroundTasks
-):
-    """
-    Generate a new chemistry lesson.
-
-    Workflow:
-    1. Optionally scrape a URL via Zyte API
-    2. Generate lesson content via LLM
-    3. Save as 'draft' in Appwrite (not visible to students yet)
-
-    The generation runs in the background. A placeholder document is created
-    immediately so the client can poll for completion.
-    """
-    topic = request.topic or "Allgemeine Organische Chemie"
-
-    # Create a placeholder document immediately
-    databases = get_databases()
-    now = datetime.now(timezone.utc).isoformat()
-    placeholder = {
-        "title": f"Generierung: {topic}",
-        "category": "Organische Chemie",
-        "icon": "⏳",
-        "order": 9999,
-        "reading_time": 0,
-        "description": "Lektion wird im Hintergrund generiert…",
-        "content": "",
-        "steps": [],
-        "status": "draft",
-        "created_at": now,
-        "updated_at": now,
-    }
-
-    result = databases.create_document(
-        database_id=APPWRITE_DATABASE_ID,
-        collection_id=APPWRITE_COLLECTION_ID,
-        document_id=ID.unique(),
-        data=placeholder,
-    )
-
-    # Start the actual generation in the background
-    background_tasks.add_task(generate_and_save_lesson, topic, request.source_url)
-
-    return LessonResponse(
-        id=result["$id"],
-        title=placeholder["title"],
-        status="draft",
-        created_at=now,
-    )
-
-
-@app.post("/request-lesson", tags=["Lessons"])
-async def request_lesson(
-    request: LessonRequest, background_tasks: BackgroundTasks
-):
-    """
-    Admin requests a new specific topic.
-
-    The lesson is generated as a draft and queued for admin review.
-    Priority is stored as metadata (currently logged; can be extended
-    with a dedicated requests collection).
-    """
-    background_tasks.add_task(generate_and_save_lesson, request.topic, None)
-
-    return {
-        "message": f"Lektionsanfrage für '{request.topic}' wurde in die Warteschlange gestellt.",
-        "topic": request.topic,
-        "priority": request.priority,
-        "status": "queued",
-    }
-
-
-@app.get(
-    "/lessons",
-    response_model=List[LessonResponse],
-    tags=["Lessons"],
-)
-async def get_lessons():
-    """
-    List all published lessons (visible to students in the learning path).
-    Ordered by the 'order' field.
-    """
-    docs = list_lessons(status_filter="published")
-    return [
-        LessonResponse(
-            id=d["$id"],
-            title=d.get("title", ""),
-            status=d.get("status", "draft"),
-            created_at=d.get("created_at", ""),
-        )
-        for d in docs
-    ]
-
-
-@app.get(
-    "/lessons/drafts",
-    response_model=List[LessonResponse],
-    tags=["Lessons"],
-)
-async def get_drafts():
-    """
-    List all draft lessons (for admin review before publishing).
-    Ordered by the 'order' field.
-    """
-    docs = list_lessons(status_filter="draft")
-    return [
-        LessonResponse(
-            id=d["$id"],
-            title=d.get("title", ""),
-            status=d.get("status", "draft"),
-            created_at=d.get("created_at", ""),
-        )
-        for d in docs
-    ]
-
-
-@app.post(
-    "/lessons/{lesson_id}/publish",
-    response_model=PublishResponse,
-    tags=["Lessons"],
-)
-async def publish_lesson_endpoint(lesson_id: str):
-    """
-    Publish a draft lesson, making it visible to students.
-
-    Sets status to 'published' in Appwrite.
-    """
-    result = publish_lesson(lesson_id)
-    return PublishResponse(
-        message="Lesson published successfully",
-        id=lesson_id,
-        status="published",
-    )
-
-
-@app.get(
-    "/lessons/{lesson_id}",
-    response_model=LessonDetailResponse,
-    tags=["Lessons"],
-)
-async def get_lesson(lesson_id: str):
-    """
-    Get a single lesson by ID, including full content and steps.
-
-    Returns the complete lesson document from Appwrite.
-    """
-    doc = get_lesson_by_id(lesson_id)
-
-    return LessonDetailResponse(
-        id=doc["$id"],
-        title=doc.get("title", ""),
-        category=doc.get("category", "Organische Chemie"),
-        icon=doc.get("icon", "🧪"),
-        order=doc.get("order", 1),
-        reading_time=doc.get("reading_time", 5),
-        description=doc.get("description", ""),
-        content=doc.get("content", ""),
-        steps=doc.get("steps", []),
-        status=doc.get("status", "draft"),
-        created_at=doc.get("created_at", ""),
-        updated_at=doc.get("updated_at", ""),
-    )
-
-
-# ---------------------------------------------------------------------------
-# Application startup
-# ---------------------------------------------------------------------------
-@app.on_event("startup")
-async def startup():
-    """Validate configuration on startup."""
-    missing = []
-    if not APPWRITE_PROJECT_ID:
-        missing.append("APPWRITE_PROJECT_ID")
-    if not APPWRITE_API_KEY:
-        missing.append("APPWRITE_API_KEY")
-    if not ZYTE_API_KEY:
-        missing.append("ZYTE_API_KEY")
-    if not LLM_API_KEY:
-        missing.append("LLM_API_KEY")
-
-    if missing:
-        print(
-            f"[WARN] Missing environment variables: {', '.join(missing)}. "
-            "Some features will be unavailable until configured."
-        )
-    else:
-        print("[INFO] All required environment variables are configured.")
+    return {"status": "healthy", "service": "chemvibe-backend"}
