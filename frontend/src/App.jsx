@@ -1,6 +1,10 @@
 import { useState, useEffect, useCallback, useRef } from "react";
+import { AuthProvider, useAuth } from "./context/AuthContext";
+import { UserProfileProvider, useUserProfile } from "./context/UserProfileContext";
 import MoleculeBuilder from "./components/MoleculeBuilder";
 import AdminDashboard from "./components/AdminDashboard";
+import AuthForm from "./components/AuthForm";
+import UserMenu from "./components/UserMenu";
 import {
   fetchPublishedLessons,
   fetchDrafts,
@@ -95,21 +99,61 @@ const DEMO_LESSONS = [
 ];
 
 // ---------------------------------------------------------------------------
-// App Hauptkomponente
+// Inner App Component (mit Auth)
 // ---------------------------------------------------------------------------
-export default function App() {
+function InnerApp() {
+  const { user, loading: authLoading, login, register, logout } = useAuth();
+
+  // Loading state for auth
+  if (authLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+          <p className="text-gray-500 font-medium">Prüfe Anmeldung...</p>
+        </div>
+      </div>
+    );
+  }
+
+  return (
+    <UserProfileProvider user={user}>
+      <InnerAppContent />
+    </UserProfileProvider>
+  );
+}
+
+function InnerAppContent() {
+  const { user, login, register, logout } = useAuth();
+  const { profile, loading: profileLoading, addXp, incrementStreak, loseHeart, completeLesson, isLessonCompleted } = useUserProfile();
+
+  // Loading state for profile
+  if (profileLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+          <p className="text-gray-500 font-medium">Lade Profil...</p>
+        </div>
+      </div>
+    );
+  }
+
   const [lessons, setLessons] = useState([]);
   const [activeLesson, setActiveLesson] = useState(null);
-  const [view, setView] = useState("skilltree"); // 'skilltree' | 'lesson' | 'result'
-  const [xp, setXp] = useState(0);
-  const [streak, setStreak] = useState(3);
-  const [hearts, setHearts] = useState(3);
-  const [level, setLevel] = useState(1);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState(null);
+  const [view, setView] = useState("skilltree"); // 'skilltree' | 'lesson' | 'result' | 'auth'
   const [showAdmin, setShowAdmin] = useState(false);
+  const [authMode, setAuthMode] = useState("login"); // 'login' | 'register'
 
+  // XP/Streak/Hearts/Level aus Profil oder Demo-Werte
+  const xp = profile?.xp ?? 0;
+  const streak = profile?.streak ?? 0;
+  const hearts = profile?.hearts ?? 3;
+  const level = profile?.level ?? 1;
+
+  // -------------------------------------------------------------------------
   // Admin Dashboard mit Tastenkombination öffnen (Ctrl+Shift+A)
+  // -------------------------------------------------------------------------
   const adminKeyRef = useRef({ ctrl: false, shift: false, a: false });
   useEffect(() => {
     const handleKeyDown = (e) => {
@@ -138,7 +182,6 @@ export default function App() {
   // -------------------------------------------------------------------------
   const loadLessons = useCallback(async () => {
     try {
-      setLoading(true);
       const published = await fetchPublishedLessons();
       if (published && published.length > 0) {
         setLessons(published);
@@ -148,9 +191,6 @@ export default function App() {
     } catch (err) {
       console.warn("Appwrite nicht verfügbar, verwende Demo-Daten:", err.message);
       setLessons(DEMO_LESSONS);
-      setError("Appwrite nicht konfiguriert – Demo-Daten werden angezeigt.");
-    } finally {
-      setLoading(false);
     }
   }, []);
 
@@ -177,10 +217,13 @@ export default function App() {
   // -------------------------------------------------------------------------
   // Challenge abgeschlossen (XP vergeben)
   // -------------------------------------------------------------------------
-  const handleChallengeComplete = (xpReward) => {
-    setXp((prev) => prev + xpReward);
-    setStreak((prev) => prev + 1);
-    setLevel(Math.floor((xp + xpReward) / 100) + 1);
+  const handleChallengeComplete = async (xpReward) => {
+    if (user && activeLesson) {
+      await completeLesson(activeLesson.id, xpReward);
+    } else {
+      // Demo-Modus: lokal speichern
+      // (XP wird über useUserProfile nicht persistiert ohne User)
+    }
     setView("result");
   };
 
@@ -192,19 +235,61 @@ export default function App() {
   };
 
   // -------------------------------------------------------------------------
-  // Skill-Tree Render (Karten-Grid)
+  // Auth View Handler
   // -------------------------------------------------------------------------
-  const renderSkillTree = () => {
-    const categoryColors = {
-      "Alkane": "from-emerald-100 to-emerald-200",
-      "Alkohole": "from-rose-100 to-rose-200",
-      "Alkene": "from-amber-100 to-amber-200",
-      "Reaktionsmechanismen": "from-indigo-100 to-indigo-200",
-    };
+  const handleAuthSuccess = (action) => {
+    if (action === "switch") {
+      setAuthMode((prev) => (prev === "login" ? "register" : "login"));
+    } else {
+      setView("skilltree");
+    }
+  };
 
-    return (
-      <div className="max-w-6xl mx-auto px-6 py-8">
-        {/* Header */}
+  // -------------------------------------------------------------------------
+  // Header Render
+  // -------------------------------------------------------------------------
+  const renderHeader = () => (
+    <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
+      <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
+        <div className="flex items-center gap-3">
+          <button
+            onClick={goToSkillTree}
+            className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"
+            title="Zurück zum Lernpfad"
+          >
+            ←
+          </button>
+          <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center text-white font-bold text-xl">
+            C
+          </div>
+          <div>
+            <h1 className="font-bold text-xl text-gray-800">ChemVibe</h1>
+            <p className="text-sm text-gray-500">Organische Chemie – Lernpfad</p>
+          </div>
+        </div>
+        <div className="flex items-center gap-4">
+          <UserMenu />
+          {!user && (
+            <button
+              onClick={() => setView("auth")}
+              className="px-4 py-2 rounded-lg font-semibold bg-indigo-600 text-white hover:bg-indigo-700"
+            >
+              Anmelden
+            </button>
+          )}
+        </div>
+      </div>
+    </header>
+  );
+
+  // -------------------------------------------------------------------------
+  // Skill-Tree Render
+  // -------------------------------------------------------------------------
+  const renderSkillTree = () => (
+    <div className="max-w-6xl mx-auto px-6 py-8">
+      {renderHeader()}
+
+      <main className="max-w-6xl mx-auto px-6 py-8">
         <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-800">ChemVibe</h1>
@@ -229,12 +314,6 @@ export default function App() {
           </div>
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 rounded-xl bg-amber-50 border border-amber-200 text-amber-800 text-sm">
-            {error}
-          </div>
-        )}
-
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-800">Lektionen entdecken</h2>
           <button
@@ -248,32 +327,38 @@ export default function App() {
 
         {/* Lektions-Grid */}
         <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {lessons.map((lesson) => (
-            <div
-              key={lesson.id}
-              className="group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-xl hover:border-indigo-300 transition-all cursor-pointer p-6"
-              onClick={() => selectLesson(lesson)}
-            >
-              <div className="flex items-center justify-between mb-4">
-                <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                  {lesson.category}
-                </span>
-                <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-indigo-100 text-indigo-600 font-bold">
-                  {lesson.id.slice(-1)}
+          {lessons.map((lesson) => {
+            const completed = isLessonCompleted(lesson.id);
+            return (
+              <div
+                key={lesson.id}
+                className={`group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-xl transition-all cursor-pointer p-6 ${
+                  completed ? "border-emerald-300 bg-emerald-50" : "hover:border-indigo-300"
+                }`}
+                onClick={() => selectLesson(lesson)}
+              >
+                <div className="flex items-center justify-between mb-4">
+                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                    {lesson.category}
+                  </span>
+                  <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-indigo-100 text-indigo-600 font-bold">
+                    {lesson.id.slice(-1)}
+                  </div>
+                </div>
+                <h3 className="text-lg font-bold text-gray-800 mb-2 group-hover:text-indigo-600 transition-colors">
+                  {lesson.title}
+                  {completed && <span className="ml-2 text-emerald-500">✅</span>}
+                </h3>
+                <p className="text-sm text-gray-500 mb-4 line-clamp-2">
+                  {lesson.theory?.slice(0, 120)}...
+                </p>
+                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
+                  <span className="text-xs text-gray-400">🧪 Molekül-Baukasten</span>
+                  <span className="text-xs font-semibold text-indigo-600">Starten ▸</span>
                 </div>
               </div>
-              <h3 className="text-lg font-bold text-gray-800 mb-2 group-hover:text-indigo-600 transition-colors">
-                {lesson.title}
-              </h3>
-              <p className="text-sm text-gray-500 mb-4 line-clamp-2">
-                {lesson.theory?.slice(0, 120)}...
-              </p>
-              <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                <span className="text-xs text-gray-400">🧪 Molekül-Baukasten</span>
-                <span className="text-xs font-semibold text-indigo-600">Starten ▸</span>
-              </div>
-            </div>
-          ))}
+            );
+          })}
         </div>
 
         {lessons.length === 0 && (
@@ -281,51 +366,62 @@ export default function App() {
             <p className="text-gray-500 text-lg">Keine Lektionen verfügbar.</p>
           </div>
         )}
-      </div>
-    );
-  };
+      </main>
+    </div>
+  );
 
   // -------------------------------------------------------------------------
-  // Lektion-Ansicht (Theory + MoleculeBuilder)
+  // Lektion-Ansicht
   // -------------------------------------------------------------------------
   const renderLessonView = () => {
     if (!activeLesson) return null;
 
+    const completed = isLessonCompleted(activeLesson.id);
+
     return (
       <div className="max-w-6xl mx-auto px-6 py-8">
-        <button
-          onClick={goToSkillTree}
-          className="mb-6 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-indigo-600"
-        >
-          ← Zurück zum Lernpfad
-        </button>
+        {renderHeader()}
 
-        <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
-          {/* Theory-Panel */}
-          <div className="p-8 border-b border-gray-100 bg-gray-50">
-            <div className="flex items-center gap-3 mb-4">
-              <span className="px-2 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-600 border border-indigo-200">
-                {activeLesson.category}
-              </span>
-              <span className="text-xs text-gray-400">• Molekül-Baukasten</span>
+        <main className="max-w-6xl mx-auto px-6 py-8">
+          <button
+            onClick={goToSkillTree}
+            className="mb-6 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-indigo-600"
+          >
+            ← Zurück zum Lernpfad
+          </button>
+
+          <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
+            {/* Theory-Panel */}
+            <div className="p-8 border-b border-gray-100 bg-gray-50">
+              <div className="flex items-center gap-3 mb-4">
+                <span className="px-2 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-600 border border-indigo-200">
+                  {activeLesson.category}
+                </span>
+                <span className="text-xs text-gray-400">• Molekül-Baukasten</span>
+                {completed && (
+                  <span className="px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-600 border border-emerald-200">
+                    Abgeschlossen
+                  </span>
+                )}
+              </div>
+              <h2 className="text-2xl font-bold text-gray-800 mb-3">
+                {activeLesson.title}
+              </h2>
+              <p className="text-gray-600 leading-relaxed">
+                {activeLesson.theory}
+              </p>
             </div>
-            <h2 className="text-2xl font-bold text-gray-800 mb-3">
-              {activeLesson.title}
-            </h2>
-            <p className="text-gray-600 leading-relaxed">
-              {activeLesson.theory}
-            </p>
-          </div>
 
-          {/* Molekül-Baukasten */}
-          <div className="p-8">
-            <MoleculeBuilder
-              challenge={activeLesson.challenge}
-              onComplete={handleChallengeComplete}
-              xpReward={30}
-            />
+            {/* Molekül-Baukasten */}
+            <div className="p-8">
+              <MoleculeBuilder
+                challenge={activeLesson.challenge}
+                onComplete={handleChallengeComplete}
+                xpReward={30}
+              />
+            </div>
           </div>
-        </div>
+        </main>
       </div>
     );
   };
@@ -338,59 +434,61 @@ export default function App() {
 
     return (
       <div className="max-w-2xl mx-auto px-6 py-20 text-center">
-        <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6 text-4xl">
-          ✅
-        </div>
-        <h2 className="text-3xl font-bold text-gray-800 mb-2">Challenge gelöst!</h2>
-        <p className="text-gray-500 mb-8">
-          Du hast "{activeLesson.title}" erfolgreich aufgebaut.
-        </p>
+        {renderHeader()}
 
-        <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-2xl p-6 border border-green-200 inline-block mb-10">
-          <div className="flex justify-between text-sm mb-2">
-            <span className="text-gray-500">XP verdient</span>
-            <span className="font-bold text-green-700">+30 XP</span>
+        <main className="max-w-2xl mx-auto px-6 py-8">
+          <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6 text-4xl">
+            ✅
           </div>
-          <div className="flex justify-between text-sm">
-            <span className="text-gray-500">Neuer Stand</span>
-            <span className="font-bold text-gray-800">⚡ {xp} XP</span>
-          </div>
-        </div>
+          <h2 className="text-3xl font-bold text-gray-800 mb-2">Challenge gelöst!</h2>
+          <p className="text-gray-500 mb-8">
+            Du hast "{activeLesson.title}" erfolgreich aufgebaut.
+          </p>
 
-        <div className="flex gap-3 justify-center">
-          <button
-            onClick={retryChallenge}
-            className="px-8 py-3 rounded-xl font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-          >
-            Noch einmal
-          </button>
-          <button
-            onClick={goToSkillTree}
-            className="px-8 py-3 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg"
-          >
-            Zum Lernpfad
-          </button>
-        </div>
+          <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-2xl p-6 border border-green-200 inline-block mb-10">
+            <div className="flex justify-between text-sm mb-2">
+              <span className="text-gray-500">XP verdient</span>
+              <span className="font-bold text-green-700">+30 XP</span>
+            </div>
+            <div className="flex justify-between text-sm">
+              <span className="text-gray-500">Neuer Stand</span>
+              <span className="font-bold text-gray-800">⚡ {xp + 30} XP</span>
+            </div>
+          </div>
+
+          <div className="flex gap-3 justify-center">
+            <button
+              onClick={retryChallenge}
+              className="px-8 py-3 rounded-xl font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
+            >
+              Noch einmal
+            </button>
+            <button
+              onClick={goToSkillTree}
+              className="px-8 py-3 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg"
+            >
+              Zum Lernpfad
+            </button>
+          </div>
+        </main>
       </div>
     );
   };
 
   // -------------------------------------------------------------------------
-  // Loading State
+  // Auth View
   // -------------------------------------------------------------------------
-  if (loading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-          <p className="text-gray-500 font-medium">Lektionen werden geladen...</p>
-        </div>
-      </div>
-    );
-  }
+  const renderAuthView = () => (
+    <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
+      <AuthForm
+        mode={authMode}
+        onSuccess={handleAuthSuccess}
+      />
+    </div>
+  );
 
   // -------------------------------------------------------------------------
-  // Haupt-Render je nach View
+  // Admin Dashboard
   // -------------------------------------------------------------------------
   if (showAdmin) {
     return (
@@ -398,9 +496,27 @@ export default function App() {
     );
   }
 
+  // -------------------------------------------------------------------------
+  // Haupt-Render je nach View
+  // -------------------------------------------------------------------------
+  if (view === "auth") {
+    return renderAuthView();
+  }
+
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800">
       {view === "skilltree" ? renderSkillTree() : view === "lesson" ? renderLessonView() : renderResultView()}
     </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Root App mit Providern
+// ---------------------------------------------------------------------------
+export default function App() {
+  return (
+    <AuthProvider>
+      <InnerApp />
+    </AuthProvider>
   );
 }
