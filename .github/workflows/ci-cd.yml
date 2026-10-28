@@ -1,4 +1,4 @@
-name: CI/CD
+name: CI
 
 on:
   push:
@@ -8,16 +8,10 @@ on:
 
 permissions:
   contents: read
-  pages: write
-  id-token: write
-
-concurrency:
-  group: "pages"
-  cancel-in-progress: false
 
 jobs:
   # -------------------------------------------------------------------------
-  # Frontend: install, lint, build, test
+  # Frontend: install, lint, test (build & deploy handled externally)
   # -------------------------------------------------------------------------
   frontend:
     runs-on: ubuntu-latest
@@ -43,16 +37,6 @@ jobs:
 
       - name: Test (Vitest)
         run: npm test || true
-
-      - name: Build (Vite)
-        run: npm run build
-
-      - name: Upload build artifact
-        uses: actions/upload-artifact@v4
-        with:
-          name: frontend-build
-          path: ./frontend/dist
-          retention-days: 1
 
   # -------------------------------------------------------------------------
   # Backend: install, lint, test
@@ -85,35 +69,3 @@ jobs:
 
       - name: Run tests
         run: pytest -v || true
-
-  # -------------------------------------------------------------------------
-  # Deploy frontend to GitHub Pages
-  # -------------------------------------------------------------------------
-  deploy:
-    needs: frontend
-    runs-on: ubuntu-latest
-    if: github.ref == 'refs/heads/main'
-    environment:
-      name: github-pages
-      url: ${{ steps.deployment.outputs.page_url }}
-    steps:
-      - name: Checkout repository
-        uses: actions/checkout@v4
-
-      - name: Download frontend build artifact
-        uses: actions/download-artifact@v4
-        with:
-          name: frontend-build
-          path: ./frontend/dist
-
-      - name: Setup Pages
-        uses: actions/configure-pages@v5
-
-      - name: Upload frontend artifact
-        uses: actions/upload-pages-artifact@v3
-        with:
-          path: './frontend/dist'
-
-      - name: Deploy to GitHub Pages
-        id: deployment
-        uses: actions/deploy-pages@v4
