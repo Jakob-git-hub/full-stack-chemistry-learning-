@@ -2,12 +2,14 @@ import { useState, useEffect, useCallback, useRef } from "react";
 import { AuthProvider, useAuth } from "./context/AuthContext";
 import { UserProfileProvider, useUserProfile } from "./context/UserProfileContext";
 import MoleculeBuilder from "./components/MoleculeBuilder";
+import LessonInProgress from "./components/LessonInProgress";
+import LessonResult from "./components/LessonResult";
+import Profile from "./components/Profile";
 import AdminDashboard from "./components/AdminDashboard";
 import AuthForm from "./components/AuthForm";
 import UserMenu from "./components/UserMenu";
 import {
   fetchPublishedLessons,
-  fetchDrafts,
   APPWRITE_CONFIG,
 } from "./services/appwrite";
 
@@ -18,8 +20,8 @@ const DEMO_LESSONS = [
   {
     id: "demo-1",
     title: "Methan aufbauen",
-    category: "Alkane",
-    theory: "Methan (CH₄) ist das einfachste Alkan. Es besteht aus einem Kohlenstoffatom, das mit vier Wasserstoffatomen verbunden ist.",
+    category: "Organic Chemistry",
+    theory: "Methan (CH₄) ist das einfachste Alkan. Es besteht aus einem Kohlenstoffatom, das mit vier Wasserstoffatomen verbunden ist.\n\n💡 Wusstest du schon? Methan ist der Hauptbestandteil von Erdgas und ein starkes Treibhausgas.",
     challenge: {
       type: "molecule_builder",
       question: "Baue Methan (CH₄) – ein Kohlenstoff mit vier Wasserstoffen.",
@@ -44,8 +46,8 @@ const DEMO_LESSONS = [
   {
     id: "demo-2",
     title: "Methanol aufbauen",
-    category: "Alkohole",
-    theory: "Methanol (CH₃OH) ist der einfachste Alkohol. Es hat eine Hydroxygruppe (-OH) an einem Kohlenstoff.",
+    category: "Organic Chemistry",
+    theory: "Methanol (CH₃OH) ist der einfachste Alkohol. Es hat eine Hydroxygruppe (-OH) an einem Kohlenstoff.\n\n💡 Wusstest du schon? Methanol wird auch als Holzalkohol bezeichnet und ist die einfachste Form von Alkohol.",
     challenge: {
       type: "molecule_builder",
       question: "Baue Methanol (CH₃OH) – füge eine Hydroxygruppe an Methan an.",
@@ -72,8 +74,8 @@ const DEMO_LESSONS = [
   {
     id: "demo-3",
     title: "Ethen aufbauen",
-    category: "Alkene",
-    theory: "Ethen (C₂H₄) ist das einfachste Alken mit einer Doppelbindung zwischen zwei Kohlenstoffatomen.",
+    category: "Organic Chemistry",
+    theory: "Ethen (C₂H₄) ist das einfachste Alken mit einer Doppelbindung zwischen zwei Kohlenstoffatomen.\n\n💡 Wusstest du schon? Ethen wird als Pflanzenhormon verwendet und reift Früchte nach.",
     challenge: {
       type: "molecule_builder",
       question: "Baue Ethen (C₂H₄) – zwei Kohlenstoffe mit einer Doppelbindung.",
@@ -125,7 +127,12 @@ function InnerApp() {
 
 function InnerAppContent() {
   const { user, login, register, logout } = useAuth();
-  const { profile, loading: profileLoading, addXp, incrementStreak, loseHeart, completeLesson, isLessonCompleted } = useUserProfile();
+  const {
+    profile,
+    loading: profileLoading,
+    completeLesson,
+    isLessonCompleted,
+  } = useUserProfile();
 
   // Loading state for profile
   if (profileLoading) {
@@ -141,9 +148,10 @@ function InnerAppContent() {
 
   const [lessons, setLessons] = useState([]);
   const [activeLesson, setActiveLesson] = useState(null);
-  const [view, setView] = useState("skilltree"); // 'skilltree' | 'lesson' | 'result' | 'auth'
+  const [view, setView] = useState("skilltree"); // 'skilltree' | 'lesson-in-progress' | 'lesson-result' | 'profile' | 'auth'
   const [showAdmin, setShowAdmin] = useState(false);
   const [authMode, setAuthMode] = useState("login"); // 'login' | 'register'
+  const [lessonResult, setLessonResult] = useState(null); // { xpReward, score, heartsRemaining }
 
   // XP/Streak/Hearts/Level aus Profil oder Demo-Werte
   const xp = profile?.xp ?? 0;
@@ -199,11 +207,27 @@ function InnerAppContent() {
   }, [loadLessons]);
 
   // -------------------------------------------------------------------------
-  // Lektion auswählen
+  // Nächste unvollendete Lektion finden
+  // -------------------------------------------------------------------------
+  const getNextLesson = useCallback(() => {
+    const startIndex = activeLesson
+      ? lessons.findIndex((l) => l.id === activeLesson.id)
+      : -1;
+    if (startIndex === -1) return lessons[0];
+    for (let i = 1; i <= lessons.length; i++) {
+      const candidate = lessons[(startIndex + i) % lessons.length];
+      if (!isLessonCompleted(candidate.id)) return candidate;
+    }
+    return lessons[0];
+  }, [lessons, activeLesson, isLessonCompleted]);
+
+  // -------------------------------------------------------------------------
+  // Lektion auswählen (öffnet During-Lesson View)
   // -------------------------------------------------------------------------
   const selectLesson = (lesson) => {
     setActiveLesson(lesson);
-    setView("lesson");
+    setView("lesson-in-progress");
+    setLessonResult(null);
   };
 
   // -------------------------------------------------------------------------
@@ -212,26 +236,72 @@ function InnerAppContent() {
   const goToSkillTree = () => {
     setView("skilltree");
     setActiveLesson(null);
+    setLessonResult(null);
   };
 
   // -------------------------------------------------------------------------
-  // Challenge abgeschlossen (XP vergeben)
+  // Zurück zum Profil
+  // -------------------------------------------------------------------------
+  const goToProfile = () => {
+    setView("profile");
+  };
+
+  // -------------------------------------------------------------------------
+  // Challenge abgeschlossen (XP vergeben, Ergebnis-View öffnen)
   // -------------------------------------------------------------------------
   const handleChallengeComplete = async (xpReward) => {
+    let result = null;
     if (user && activeLesson) {
-      await completeLesson(activeLesson.id, xpReward);
+      result = await completeLesson(
+        activeLesson.id,
+        xpReward,
+        100,
+        3,
+        activeLesson.title,
+        activeLesson.category
+      );
     } else {
-      // Demo-Modus: lokal speichern
-      // (XP wird über useUserProfile nicht persistiert ohne User)
+      // Demo-Modus: lokaler Abschluss-Eintrag
+      result = {
+        lessonEntry: {
+          lessonId: activeLesson.id,
+          title: activeLesson.title,
+          category: activeLesson.category,
+          completedAt: new Date().toISOString(),
+          score: 100,
+          xpEarned: xpReward,
+          heartsRemaining: 3,
+        },
+      };
     }
-    setView("result");
+    setLessonResult({
+      xpReward,
+      score: result?.lessonEntry?.score ?? 100,
+      heartsRemaining: result?.lessonEntry?.heartsRemaining ?? 3,
+    });
+    setView("lesson-result");
   };
 
   // -------------------------------------------------------------------------
-  // Nächste Challenge versuchen
+  // Nächste Lektion starten
   // -------------------------------------------------------------------------
-  const retryChallenge = () => {
-    setView("lesson");
+  const handleNextLesson = () => {
+    const next = getNextLesson();
+    if (next) selectLesson(next);
+  };
+
+  // -------------------------------------------------------------------------
+  // Fehler wiederholen (gleiche Lektion erneut)
+  // -------------------------------------------------------------------------
+  const handleReviewMistakes = () => {
+    if (activeLesson) selectLesson(activeLesson);
+  };
+
+  // -------------------------------------------------------------------------
+  // Lektion wiederholen (aus Verlauf)
+  // -------------------------------------------------------------------------
+  const handleRetryLesson = (lesson) => {
+    selectLesson(lesson);
   };
 
   // -------------------------------------------------------------------------
@@ -252,13 +322,15 @@ function InnerAppContent() {
     <header className="bg-white border-b border-gray-200 sticky top-0 z-40">
       <div className="max-w-7xl mx-auto px-6 py-4 flex items-center justify-between">
         <div className="flex items-center gap-3">
-          <button
-            onClick={goToSkillTree}
-            className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"
-            title="Zurück zum Lernpfad"
-          >
-            ←
-          </button>
+          {view !== "skilltree" && (
+            <button
+              onClick={goToSkillTree}
+              className="w-10 h-10 rounded-xl bg-gray-100 hover:bg-gray-200 flex items-center justify-center text-gray-600"
+              title="Zurück zum Lernpfad"
+            >
+              ←
+            </button>
+          )}
           <div className="w-10 h-10 rounded-2xl bg-gradient-to-br from-rose-400 to-amber-400 flex items-center justify-center text-white font-bold text-xl">
             C
           </div>
@@ -268,7 +340,7 @@ function InnerAppContent() {
           </div>
         </div>
         <div className="flex items-center gap-4">
-          <UserMenu />
+          <UserMenu onProfile={goToProfile} />
           {!user && (
             <button
               onClick={() => setView("auth")}
@@ -283,7 +355,7 @@ function InnerAppContent() {
   );
 
   // -------------------------------------------------------------------------
-  // Skill-Tree Render
+  // Skill-Tree Render (mit Kategorie-Gruppierung & Schwierigkeits-Badges)
   // -------------------------------------------------------------------------
   const renderSkillTree = () => (
     <div className="max-w-6xl mx-auto px-6 py-8">
@@ -325,40 +397,85 @@ function InnerAppContent() {
           </button>
         </div>
 
-        {/* Lektions-Grid */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-6">
-          {lessons.map((lesson) => {
-            const completed = isLessonCompleted(lesson.id);
-            return (
-              <div
-                key={lesson.id}
-                className={`group bg-white rounded-2xl border border-gray-200 shadow-sm hover:shadow-xl transition-all cursor-pointer p-6 ${
-                  completed ? "border-emerald-300 bg-emerald-50" : "hover:border-indigo-300"
-                }`}
-                onClick={() => selectLesson(lesson)}
-              >
-                <div className="flex items-center justify-between mb-4">
-                  <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
-                    {lesson.category}
-                  </span>
-                  <div className="w-8 h-8 rounded-xl flex items-center justify-center bg-indigo-100 text-indigo-600 font-bold">
-                    {lesson.id.slice(-1)}
+        {/* Kategorie-Gruppierung */}
+        <div className="space-y-8">
+          {["Organic Chemistry", "Inorganic Chemistry", "Physical Chemistry", "Analytical"].map(
+            (category) => {
+              const categoryLessons = lessons.filter((l) => l.category === category);
+              if (categoryLessons.length === 0) return null;
+              const completedInCategory = categoryLessons.filter((l) =>
+                isLessonCompleted(l.id)
+              ).length;
+              return (
+                <div key={category} className="bg-white rounded-2xl border border-gray-200 shadow-sm overflow-hidden">
+                  <div className="p-6 border-b border-gray-100 flex items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <div className="w-10 h-10 rounded-xl flex items-center justify-center bg-indigo-100 text-indigo-600 font-bold">
+                        {category.slice(0, 1)}
+                      </div>
+                      <div>
+                        <h3 className="font-bold text-gray-800">{category}</h3>
+                        <p className="text-xs text-gray-500">
+                          {completedInCategory} / {categoryLessons.length} abgeschlossen
+                        </p>
+                      </div>
+                    </div>
+                    <span className="text-xs font-semibold px-2 py-1 rounded-full bg-gray-100 text-gray-600">
+                      {Math.round((completedInCategory / categoryLessons.length) * 100)}%
+                    </span>
+                  </div>
+                  <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4 p-6">
+                    {categoryLessons.map((lesson) => {
+                      const completed = isLessonCompleted(lesson.id);
+                      const difficultyColors = {
+                        easy: "bg-emerald-100 text-emerald-700 border-emerald-200",
+                        medium: "bg-amber-100 text-amber-700 border-amber-200",
+                        hard: "bg-rose-100 text-rose-700 border-rose-200",
+                      };
+                      const diffColor =
+                        difficultyColors[lesson.challenge?.difficulty] ||
+                        difficultyColors.medium;
+                      return (
+                        <div
+                          key={lesson.id}
+                          className={`group bg-white rounded-xl border border-gray-200 shadow-sm hover:shadow-xl transition-all cursor-pointer p-5 ${
+                            completed
+                              ? "border-emerald-300 bg-emerald-50"
+                              : "hover:border-indigo-300"
+                          }`}
+                          onClick={() => selectLesson(lesson)}
+                        >
+                          <div className="flex items-center justify-between mb-3">
+                            <span className="text-xs font-semibold uppercase tracking-wider text-gray-400">
+                              {lesson.category}
+                            </span>
+                            <span
+                              className={`text-xs font-semibold border rounded-md px-2 py-0.5 ${diffColor}`}
+                            >
+                              {lesson.challenge?.difficulty}
+                            </span>
+                          </div>
+                          <h3 className="text-lg font-bold text-gray-800 mb-2 group-hover:text-indigo-600 transition-colors">
+                            {lesson.title}
+                            {completed && <span className="ml-2 text-emerald-500">✅</span>}
+                          </h3>
+                          <p className="text-sm text-gray-500 mb-4 line-clamp-2">
+                            {lesson.theory?.slice(0, 100)}...
+                          </p>
+                          <div className="flex items-center justify-between pt-3 border-t border-gray-100">
+                            <span className="text-xs text-gray-400">🧪 Molekül-Baukasten</span>
+                            <span className="text-xs font-semibold text-indigo-600">
+                              {completed ? "Wiederholen" : "Starten"} ▸
+                            </span>
+                          </div>
+                        </div>
+                      );
+                    })}
                   </div>
                 </div>
-                <h3 className="text-lg font-bold text-gray-800 mb-2 group-hover:text-indigo-600 transition-colors">
-                  {lesson.title}
-                  {completed && <span className="ml-2 text-emerald-500">✅</span>}
-                </h3>
-                <p className="text-sm text-gray-500 mb-4 line-clamp-2">
-                  {lesson.theory?.slice(0, 120)}...
-                </p>
-                <div className="flex items-center justify-between pt-4 border-t border-gray-100">
-                  <span className="text-xs text-gray-400">🧪 Molekül-Baukasten</span>
-                  <span className="text-xs font-semibold text-indigo-600">Starten ▸</span>
-                </div>
-              </div>
-            );
-          })}
+              );
+            }
+          )}
         </div>
 
         {lessons.length === 0 && (
@@ -371,119 +488,79 @@ function InnerAppContent() {
   );
 
   // -------------------------------------------------------------------------
-  // Lektion-Ansicht
+  // During-Lesson View (LessonInProgress)
   // -------------------------------------------------------------------------
-  const renderLessonView = () => {
+  const renderLessonInProgress = () => {
     if (!activeLesson) return null;
-
     const completed = isLessonCompleted(activeLesson.id);
-
     return (
       <div className="max-w-6xl mx-auto px-6 py-8">
         {renderHeader()}
-
         <main className="max-w-6xl mx-auto px-6 py-8">
-          <button
-            onClick={goToSkillTree}
-            className="mb-6 flex items-center gap-2 text-sm font-semibold text-gray-600 hover:text-indigo-600"
-          >
-            ← Zurück zum Lernpfad
-          </button>
-
-          <div className="bg-white rounded-3xl shadow-xl border border-gray-100 overflow-hidden">
-            {/* Theory-Panel */}
-            <div className="p-8 border-b border-gray-100 bg-gray-50">
-              <div className="flex items-center gap-3 mb-4">
-                <span className="px-2 py-1 rounded-full text-xs font-semibold bg-indigo-100 text-indigo-600 border border-indigo-200">
-                  {activeLesson.category}
-                </span>
-                <span className="text-xs text-gray-400">• Molekül-Baukasten</span>
-                {completed && (
-                  <span className="px-2 py-1 rounded-full text-xs font-semibold bg-emerald-100 text-emerald-600 border border-emerald-200">
-                    Abgeschlossen
-                  </span>
-                )}
-              </div>
-              <h2 className="text-2xl font-bold text-gray-800 mb-3">
-                {activeLesson.title}
-              </h2>
-              <p className="text-gray-600 leading-relaxed">
-                {activeLesson.theory}
+          <LessonInProgress
+            lesson={activeLesson}
+            onComplete={handleChallengeComplete}
+            onPause={() => {}}
+            onResume={() => {}}
+            onBack={goToSkillTree}
+          />
+          {completed && (
+            <div className="mt-6 p-4 rounded-xl bg-amber-50 border border-amber-100 text-center">
+              <p className="text-sm text-amber-700 font-semibold">
+                Diese Lektion hast du bereits abgeschlossen. Du kannst sie trotzdem wiederholen.
               </p>
             </div>
-
-            {/* Molekül-Baukasten */}
-            <div className="p-8">
-              <MoleculeBuilder
-                challenge={activeLesson.challenge}
-                onComplete={handleChallengeComplete}
-                xpReward={30}
-              />
-            </div>
-          </div>
+          )}
         </main>
       </div>
     );
   };
 
   // -------------------------------------------------------------------------
-  // Ergebnis-Ansicht
+  // Ergebnis-Ansicht (LessonResult)
   // -------------------------------------------------------------------------
-  const renderResultView = () => {
-    if (!activeLesson) return null;
-
+  const renderLessonResult = () => {
+    if (!activeLesson || !lessonResult) return null;
     return (
-      <div className="max-w-2xl mx-auto px-6 py-20 text-center">
+      <div className="max-w-2xl mx-auto px-6 py-12">
         {renderHeader()}
-
         <main className="max-w-2xl mx-auto px-6 py-8">
-          <div className="w-20 h-20 rounded-full bg-green-100 flex items-center justify-center mx-auto mb-6 text-4xl">
-            ✅
-          </div>
-          <h2 className="text-3xl font-bold text-gray-800 mb-2">Challenge gelöst!</h2>
-          <p className="text-gray-500 mb-8">
-            Du hast "{activeLesson.title}" erfolgreich aufgebaut.
-          </p>
-
-          <div className="bg-gradient-to-br from-green-50 to-emerald-100 rounded-2xl p-6 border border-green-200 inline-block mb-10">
-            <div className="flex justify-between text-sm mb-2">
-              <span className="text-gray-500">XP verdient</span>
-              <span className="font-bold text-green-700">+30 XP</span>
-            </div>
-            <div className="flex justify-between text-sm">
-              <span className="text-gray-500">Neuer Stand</span>
-              <span className="font-bold text-gray-800">⚡ {xp + 30} XP</span>
-            </div>
-          </div>
-
-          <div className="flex gap-3 justify-center">
-            <button
-              onClick={retryChallenge}
-              className="px-8 py-3 rounded-xl font-semibold bg-white border border-gray-200 text-gray-700 hover:bg-gray-50"
-            >
-              Noch einmal
-            </button>
-            <button
-              onClick={goToSkillTree}
-              className="px-8 py-3 rounded-xl font-semibold bg-indigo-600 text-white hover:bg-indigo-700 shadow-lg"
-            >
-              Zum Lernpfad
-            </button>
-          </div>
+          <LessonResult
+            lesson={activeLesson}
+            xpReward={lessonResult.xpReward}
+            score={lessonResult.score}
+            heartsRemaining={lessonResult.heartsRemaining}
+            onNextLesson={handleNextLesson}
+            onReviewMistakes={handleReviewMistakes}
+            onBackToSkillTree={goToSkillTree}
+          />
         </main>
       </div>
     );
   };
+
+  // -------------------------------------------------------------------------
+  // Profil-Ansicht
+  // -------------------------------------------------------------------------
+  const renderProfile = () => (
+    <div className="max-w-4xl mx-auto px-6 py-8">
+      {renderHeader()}
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        <Profile
+          allLessons={lessons}
+          onRetryLesson={handleRetryLesson}
+          onBack={goToSkillTree}
+        />
+      </main>
+    </div>
+  );
 
   // -------------------------------------------------------------------------
   // Auth View
   // -------------------------------------------------------------------------
   const renderAuthView = () => (
     <div className="min-h-screen bg-gray-50 flex items-center justify-center p-6">
-      <AuthForm
-        mode={authMode}
-        onSuccess={handleAuthSuccess}
-      />
+      <AuthForm mode={authMode} onSuccess={handleAuthSuccess} />
     </div>
   );
 
@@ -491,9 +568,7 @@ function InnerAppContent() {
   // Admin Dashboard
   // -------------------------------------------------------------------------
   if (showAdmin) {
-    return (
-      <AdminDashboard onClose={() => setShowAdmin(false)} />
-    );
+    return <AdminDashboard onClose={() => setShowAdmin(false)} />;
   }
 
   // -------------------------------------------------------------------------
@@ -505,7 +580,15 @@ function InnerAppContent() {
 
   return (
     <div className="min-h-screen bg-gray-50 text-gray-800">
-      {view === "skilltree" ? renderSkillTree() : view === "lesson" ? renderLessonView() : renderResultView()}
+      {view === "skilltree"
+        ? renderSkillTree()
+        : view === "lesson-in-progress"
+        ? renderLessonInProgress()
+        : view === "lesson-result"
+        ? renderLessonResult()
+        : view === "profile"
+        ? renderProfile()
+        : null}
     </div>
   );
 }

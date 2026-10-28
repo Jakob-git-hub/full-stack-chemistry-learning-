@@ -4,7 +4,7 @@ import { useUserProfile } from "../context/UserProfileContext";
 // ---------------------------------------------------------------------------
 // User Menu Component (Header)
 // ---------------------------------------------------------------------------
-export default function UserMenu() {
+export default function UserMenu({ onProfile }) {
   const { user, logout } = useAuth();
   const { profile } = useUserProfile();
 
@@ -75,6 +75,18 @@ export default function UserMenu() {
             <p className="text-xs text-gray-500">XP</p>
           </div>
         </div>
+
+        {onProfile && (
+          <button
+            onClick={() => {
+              document.getElementById("user-dropdown")?.classList.add("hidden");
+              onProfile();
+            }}
+            className="w-full px-4 py-2 text-left text-gray-700 font-medium hover:bg-gray-50 rounded-xl mx-2 mt-2 flex items-center gap-2"
+          >
+            👤 Profil
+          </button>
+        )}
 
         <button
           onClick={logout}
