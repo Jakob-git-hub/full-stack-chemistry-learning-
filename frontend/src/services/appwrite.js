@@ -2,20 +2,36 @@ import { Client, Databases, ID, Query } from "appwrite";
 
 // ---------------------------------------------------------------------------
 // Appwrite Web SDK Konfiguration
-// Alle Werte über Umgebungsvariablen (Vite: import.meta.env.VITE_*)
+// Project: ChemLeaner (6ae104eb001d990f63e6)
+// Endpoint: https://fra.cloud.appwrite.io/v1
 // ---------------------------------------------------------------------------
 const client = new Client();
 
 client
-  .setEndpoint(import.meta.env.VITE_APPWRITE_ENDPOINT || "https://cloud.appwrite.io/v1")
-  .setProject(import.meta.env.VITE_APPWRITE_PROJECT_ID || "")
-  .setKey(import.meta.env.VITE_APPWRITE_API_KEY || "");
+  .setEndpoint("https://fra.cloud.appwrite.io/v1")
+  .setProject("6ae104eb001d990f63e6");
 
 const databases = new Databases(client);
 
+/**
+ * Testet die Appwrite-Verbindung.
+ * Aufruf in main.jsx nach React-Mount.
+ */
+export async function testAppwriteConnection() {
+  try {
+    await client.ping();
+    console.log("✅ Appwrite connected successfully");
+    return true;
+  } catch (err) {
+    console.warn("⚠️ Appwrite connection failed (using demo mode):", err.message);
+    return false;
+  }
+}
+
 export const APPWRITE_CONFIG = {
-  DATABASE_ID: import.meta.env.VITE_APPWRITE_DATABASE_ID || "chemvibe",
-  COLLECTION_ID: import.meta.env.VITE_APPWRITE_COLLECTION_ID || "lessons",
+  DATABASE_ID: "chemvibe",
+  COLLECTION_ID: "lessons",
+  PROFILES_COLLECTION_ID: "user_profiles",
 };
 
 /**
