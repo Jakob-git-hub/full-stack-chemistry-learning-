@@ -58,10 +58,17 @@ chem-vibe-project/
 │   │   │   ├── MoleculeBuilder.jsx   # SVG molecule builder (drag-drop, bonds, validation)
 │   │   │   ├── AdminDashboard.jsx    # Draft management (list, view, publish, delete)
 │   │   │   ├── AuthForm.jsx          # Login/register modal
-│   │   │   └── UserMenu.jsx          # Header user dropdown with stats
+│   │   │   ├── UserMenu.jsx          # Header user dropdown with stats (+ profile nav)
+│   │   │   ├── LessonInProgress.jsx  # During-lesson: theory, callouts, progress, hearts, pause
+│   │   │   ├── LessonResult.jsx      # After-lesson: confetti, animated XP, streak, summary, share
+│   │   │   ├── Profile.jsx           # Profile: overview, history, badges, settings tabs
+│   │   │   ├── LessonHistory.jsx     # Completed lessons list with filter & retry
+│   │   │   ├── Badges.jsx            # Badge collection view
+│   │   │   ├── AchievementBadge.jsx  # Single locked/unlocked badge with progress
+│   │   │   └── CategoryCard.jsx      # Skill tree category card with progress ring
 │   │   ├── context/
 │   │   │   ├── AuthContext.jsx       # Appwrite Account auth (session, register, login, logout)
-│   │   │   └── UserProfileContext.jsx # User progress (XP, streak, hearts, level, completed lessons)
+│   │   │   └── UserProfileContext.jsx # User progress (XP, streak, hearts, level, achievements, lesson history, streak freeze, daily goal, settings, demo persistence)
 │   │   └── services/
 │   │       └── appwrite.js           # Appwrite client config + fetch functions
 │   ├── index.html            # Entry point with <div id="root"></div>
@@ -105,15 +112,48 @@ chem-vibe-project/
 
 | View | Route/State | Description |
 |------|-------------|-------------|
-| Skill Tree | `view="skilltree"` | Learning path with lesson cards, XP/Streak/Hearts display |
-| Lesson | `view="lesson"` | Theory + Molecule Builder challenge |
-| Result | `view="result"` | Completion celebration with XP reward |
+| Skill Tree | `view="skilltree"` | Learning path with category grouping, difficulty badges, progress rings |
+| Lesson In Progress | `view="lesson-in-progress"` | During-lesson: theory cards, Did-you-know callouts, progress bar, hearts, pause/resume, Molecule Builder |
+| Lesson Result | `view="lesson-result"` | After-lesson: confetti, animated XP counter, streak, hearts, lesson summary, actions, share |
+| Profile | `view="profile"` | Profile overview with tabs: overview, history, badges, settings |
 | Auth | `view="auth"` | Login/Register modal |
 | Admin | `showAdmin=true` | Draft listing, detail modal, publish/delete (Ctrl+Shift+A) |
 
 ---
 
-## 6. Backend Agent Workflow
+## 6. Frontend Components & Gamification
+
+### New Components
+
+| Component | Path | Description |
+|-----------|------|-------------|
+| LessonInProgress | `src/components/LessonInProgress.jsx` | During-lesson screen: theory cards with chemical formulas, Did-you-know callouts, progress indicator, hearts display, pause/resume, wraps MoleculeBuilder |
+| LessonResult | `src/components/LessonResult.jsx` | After-lesson screen: canvas confetti, animated XP counter, streak flame, hearts remaining, lesson summary, Next Lesson / Review Mistakes / Back to Skill Tree actions, share |
+| Profile | `src/components/Profile.jsx` | Profile section with tabs: overview (avatar, level, XP bar, streak, hearts, stats), history, badges, settings |
+| LessonHistory | `src/components/LessonHistory.jsx` | Completed lessons list with category filter, retry button, empty state |
+| Badges | `src/components/Badges.jsx` | Badge collection view with unlocked/locked counts |
+| AchievementBadge | `src/components/AchievementBadge.jsx` | Single badge: locked/unlocked state, progress bar, icon |
+| CategoryCard | `src/components/CategoryCard.jsx` | Skill tree category card with progress ring |
+
+### Achievements (Badges)
+Defined in `UserProfileContext.jsx` (`ACHIEVEMENT_DEFINITIONS`):
+- **Erstes Molekül** — 1 Lektion abgeschlossen
+- **Organic Chemistry Novice** — 3 Lektionen der Kategorie "Organic Chemistry"
+- **7-Tage-Streak** — Streak von 7 Tagen
+- **100 XP** — 100 Gesamt-XP gesammelt
+- **Perfektionist** — Lektion mit 3 verbleibenden Herzen abgeschlossen
+
+### Gamification Features
+- **Level:** `Level = floor(XP / 100) + 1`, XP-Bar mit Fortschritt zum nächsten Level
+- **Streak:** Einmal pro Kalendertag erhöhbar, Datum basiert, Flame-Icon
+- **Hearten:** Max. 3, regenerieren alle 30 Minuten, Verlust bei falschem Versuch
+- **Streak Freeze:** Schützt den Streak bei verpasstem Tag (begrenzte Anzahl)
+- **Tagesziel:** XP-Tagesziel mit Fortschrittsbalken
+- **Demo-Modus:** Fortschritte werden unter `chemvibe_demo_profile` in localStorage persistiert
+
+---
+
+## 7. Backend Agent Workflow
 
 1. **Plan:** LLM decides which URLs to scrape for a chemistry topic
 2. **Scrape:** Zyte Extraction API fetches raw data from URLs
@@ -122,7 +162,7 @@ chem-vibe-project/
 
 ---
 
-## 7. CI/CD (GitHub Actions)
+## 8. CI/CD (GitHub Actions)
 
 Workflow (`.github/workflows/ci-cd.yml`):
 - **frontend:** ESLint + Vitest + Vite Build
@@ -133,7 +173,7 @@ Workflow (`.github/workflows/ci-cd.yml`):
 
 ---
 
-## 8. Appwrite Collections Required
+## 9. Appwrite Collections Required
 
 ### `lessons`
 - `title` (string), `category` (string), `theory` (string)
