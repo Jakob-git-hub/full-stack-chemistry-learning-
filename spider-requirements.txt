@@ -1,5 +1,8 @@
+# Local development requirements for the chem_spider.
+# Note: Zyte Scrapy Cloud installs the root-level `requirements.txt` (not this file)
+# during the `shub-build-egg` build step. Keep both in sync.
 scrapy>=2.11.0
 httpx>=0.25.0
 itemadapter>=0.8.0
-# Required by Zyte's shub-build-egg at build time (setup.py imports setuptools)
 setuptools
+wheel

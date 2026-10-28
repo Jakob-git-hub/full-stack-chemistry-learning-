@@ -1,0 +1,7 @@
+# Zyte Scrapy Cloud build requirements for chem_spider
+# setuptools/wheel are required by shub-build-egg at build time
+setuptools
+wheel
+scrapy>=2.11.0
+httpx>=0.25.0
+itemadapter>=0.8.0
