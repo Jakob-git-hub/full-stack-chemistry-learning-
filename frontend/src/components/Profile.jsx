@@ -166,7 +166,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
                   <div
                     className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-1000"
                     style={{ width: `${levelPct}%` }}
-                  />
+                  ></div>
                 </div>
                 <p className="text-xs text-gray-500">{levelPct}% zum nächsten Level</p>
               </div>
@@ -181,7 +181,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
                   <div
                     className="h-full bg-gradient-to-r from-amber-400 to-rose-400 transition-all duration-1000"
                     style={{ width: `${dailyGoal.pct}%` }}
-                  />
+                  ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                   <span>{dailyGoal.current} / {dailyGoal.target} XP heute</span>

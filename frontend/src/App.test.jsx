@@ -9,6 +9,9 @@ vi.mock("./services/appwrite", () => ({
     DATABASE_ID: "chemvibe",
     COLLECTION_ID: "lessons",
   },
+  client: {
+    config: { project: "" },
+  },
 }));
 
 import { fetchPublishedLessons } from "./services/appwrite";
