@@ -52,3 +52,29 @@ def test_list_lessons_without_appwrite():
 def test_publish_lesson_not_found():
     response = client.post("/lessons/nonexistent-id/publish")
     assert response.status_code == 404
+
+
+def test_scraped_data_endpoint():
+    response = client.post(
+        "/api/scraped-data",
+        json={
+            "spider": "chemistry",
+            "items": [{"title": "Nukleophile Substitution", "url": "https://example.com"}],
+            "scraped_at": "2026-10-28T19:32:25Z",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["items_received"] == 1
+
+
+def test_scraped_data_alias_endpoint():
+    response = client.post(
+        "/scraped-data",
+        json={"spider": "chemistry", "items": [], "scraped_at": None},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["items_received"] == 0
