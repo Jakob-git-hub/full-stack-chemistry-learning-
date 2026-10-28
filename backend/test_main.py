@@ -476,10 +476,8 @@ async def test_fetch_with_zyte_http_error_status(zyte_mock):
 
 @pytest.mark.asyncio
 async def test_fetch_with_zyte_network_exception(zyte_mock):
-    async def boom(*args, **kwargs):
-        raise Exception("network unreachable")
-
-    patcher, _ = zyte_mock([boom])
+    # side_effect as an exception instance is raised by the mocked post()
+    patcher, _ = zyte_mock([Exception("network unreachable")])
     with patcher:
         results = await fetch_with_zyte(["https://example.com"])
 
