@@ -1,6 +1,6 @@
 import { createContext, useContext, useState, useEffect, useCallback } from "react";
 import { Account, ID } from "appwrite";
-import { client } from "../services/appwrite";
+import { client, databases, APPWRITE_CONFIG } from "../services/appwrite";
 
 // ---------------------------------------------------------------------------
 // Auth Context
@@ -53,6 +53,34 @@ export function AuthProvider({ children }) {
       const newUser = await account.create(ID.unique(), email, password, name);
       // Automatisch einloggen nach Registrierung
       await login(email, password);
+      
+      // Erstelle Benutzerprofil in der user_profiles Collection
+      try {
+        await databases.createDocument(
+          APPWRITE_CONFIG.DATABASE_ID,
+          APPWRITE_CONFIG.PROFILES_COLLECTION_ID,
+          ID.unique(),
+          {
+            user_id: newUser.$id,
+            xp: 0,
+            streak: 0,
+            hearts: 3,
+            level: 1,
+            completed_lessons: [],
+            streak_freeze: 0,
+            daily_goal: 50,
+            settings: {
+              sound: true,
+              notifications: true,
+              language: "de",
+              demoMode: false,
+            },
+          }
+        );
+      } catch (profileErr) {
+        console.warn("Konnte Benutzerprofil nicht erstellen:", profileErr);
+      }
+      
       return newUser;
     } catch (err) {
       setError(err.message || "Registrierung fehlgeschlagen");
