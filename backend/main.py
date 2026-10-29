@@ -15,8 +15,8 @@ Alle API-Schlüssel und Konfigurationen über os.getenv().
 import json
 import os
 import re
-from datetime import UTC, datetime
-from typing import Any
+from datetime import datetime, timezone
+from typing import Any, Optional
 
 from dotenv import load_dotenv
 
@@ -49,8 +49,8 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY", "")
 ZYTE_API_URL = os.getenv("ZYTE_API_URL", "https://api.zyte.com/v1/extract")
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_API_URL = os.getenv("LLM_API_URL", "https://api.openai.com/v1")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_API_URL = os.getenv("LLM_API_URL", "https://integrate.api.nvidia.com/v1")
+LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3.5-super-49b-v1")
 
 # ---------------------------------------------------------------------------
 # FastAPI application
@@ -92,7 +92,7 @@ def get_llm(temperature: float = 0.7) -> ChatOpenAI:
 # ---------------------------------------------------------------------------
 class GenerateLessonRequest(BaseModel):
     topic: str = Field(..., description="Chemie-Thema, z.B. 'Nukleophile Substitution'")
-    difficulty: str | None = Field("medium", description="easy | medium | hard")
+    difficulty: Optional[str] = Field("medium", description="easy | medium | hard")
 
 
 class LessonResponse(BaseModel):
@@ -107,10 +107,10 @@ class Challenge(BaseModel):
     type: str = "molecule_builder"
     question: str
     difficulty: str
-    target_smiles: str | None = None
-    target_atoms: list[dict[str, Any]] | None = None
-    target_bonds: int | None = None
-    preplaced_atoms: list[dict[str, Any]] | None = None
+    target_smiles: Optional[str] = None
+    target_atoms: Optional[list[dict[str, Any]]] = None
+    target_bonds: Optional[int] = None
+    preplaced_atoms: Optional[list[dict[str, Any]]] = None
     palette_atoms: list[dict[str, str]]
 
 
@@ -377,8 +377,8 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
         "challenge": lesson.challenge.model_dump(),
         "status": "draft",
         "topic": topic,
-        "created_at": datetime.now(UTC).isoformat(),
-        "updated_at": datetime.now(UTC).isoformat(),
+        "created_at": datetime.now(timezone.utc).isoformat(),
+        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
     try:
@@ -450,12 +450,12 @@ async def generate_agent_lesson(request: GenerateLessonRequest):
         title=lesson.title,
         category=lesson.category,
         status="draft",
-        created_at=datetime.now(UTC).isoformat(),
+        created_at=datetime.now(timezone.utc).isoformat(),
     )
 
 
 @app.get("/lessons", response_model=list[LessonResponse])
-async def list_lessons(status_filter: str | None = None):
+async def list_lessons(status_filter: Optional[str] = None):
     """Listet alle Lektionen auf, optional gefiltert nach Status."""
     if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
         raise HTTPException(
@@ -543,7 +543,7 @@ async def publish_lesson(lesson_id: str):
             document_id=lesson_id,
             data={
                 "status": "published",
-                "updated_at": datetime.now(UTC).isoformat(),
+                "updated_at": datetime.now(timezone.utc).isoformat(),
             },
         )
         return {
@@ -569,7 +569,7 @@ async def health():
 class ScrapedDataRequest(BaseModel):
     spider: str = Field(..., description="Name of the spider that produced the items")
     items: list[dict[str, Any]] = Field(..., description="Scraped items")
-    scraped_at: str | None = Field(None, description="ISO timestamp when scraping occurred")
+    scraped_at: Optional[str] = Field(None, description="ISO timestamp when scraping occurred")
 
 
 @app.post("/api/scraped-data", status_code=status.HTTP_201_CREATED)
