@@ -63,7 +63,7 @@ class ChemSpiderPipeline:
 
             with httpx.Client(timeout=30.0) as client:
                 response = client.post(
-                    f"{self.backend_url}/api/scraped-data",
+                    f"{self.backend_url}/scraped-data",
                     json=payload,
                     headers=headers,
                 )
