@@ -1,6 +1,8 @@
 # chem_spider/settings.py
 # Scrapy settings for chem_spider project
 
+import os
+
 BOT_NAME = "chem_spider"
 
 SPIDER_MODULES = ["chem_spider.spiders"]
@@ -72,9 +74,9 @@ TWISTED_REACTOR = "twisted.internet.asyncioreactor.AsyncioSelectorReactor"
 
 # Zyte-specific settings (when deployed to Zyte)
 # These are overridden by Zyte's environment when deployed
-ZYTE_API_KEY = None
+ZYTE_API_KEY = os.getenv("ZYTE_API_KEY")
 ZYTE_API_URL = "https://api.zyte.com/v1/extract"
 
 # Backend API endpoint (your FastAPI backend on Heroku)
 BACKEND_API_URL = "https://chemvibe-backend.herokuapp.com"
-BACKEND_API_KEY = None
+BACKEND_API_KEY = os.getenv("BACKEND_API_KEY")
