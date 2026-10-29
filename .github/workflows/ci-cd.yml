@@ -33,10 +33,10 @@ jobs:
         run: npm ci
 
       - name: Lint (ESLint)
-        run: npm run lint || true
+        run: npm run lint
 
       - name: Test (Vitest)
-        run: npm test || true
+        run: npm test
 
   # -------------------------------------------------------------------------
   # Backend: install, lint, test
@@ -65,7 +65,7 @@ jobs:
       - name: Lint (Ruff)
         run: |
           pip install ruff
-          ruff check main.py || true
+          ruff check main.py
 
       - name: Run tests
-        run: pytest -v || true
+        run: pytest -v

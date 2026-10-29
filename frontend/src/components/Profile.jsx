@@ -3,6 +3,7 @@ import { useUserProfile } from "../context/UserProfileContext";
 import LessonHistory from "./LessonHistory";
 import Badges from "./Badges";
 import AchievementBadge from "./AchievementBadge";
+import XPBar from "./XPBar";
 
 // ---------------------------------------------------------------------------
 // Profil-Bereich (Übersicht, Verlauf, Erfolge, Einstellungen)
@@ -48,9 +49,6 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
     (sum, e) => sum + (typeof e === "string" ? 0 : e.xpEarned || 0),
     0
   );
-  const xpForNextLevel = (level * 100) - xp;
-  const levelPct = Math.round(((xp % 100) / 100) * 100);
-
   const dailyGoal = getDailyGoalProgress();
 
   const initials = (profile.userId || "U")
@@ -157,19 +155,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
               </div>
 
               {/* XP-Bar */}
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm font-semibold text-gray-700 mb-1">
-                  <span>Level {level}</span>
-                  <span>{xpForNextLevel} XP bis Level {level + 1}</span>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
-                  <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-1000"
-                    style={{ width: `${levelPct}%` }}
-                  />
-                </div>
-                <p className="text-xs text-gray-500">{levelPct}% zum nächsten Level</p>
-              </div>
+              <XPBar level={level} xp={xp} />
 
               {/* Tagesziel */}
               <div className="mt-6 p-5 rounded-2xl bg-amber-50 border border-amber-100">
@@ -181,7 +167,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
                   <div
                     className="h-full bg-gradient-to-r from-amber-400 to-rose-400 transition-all duration-1000"
                     style={{ width: `${dailyGoal.pct}%` }}
-                  />
+                  ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                   <span>{dailyGoal.current} / {dailyGoal.target} XP heute</span>
@@ -220,12 +206,12 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
               )}
             </div>
           </div>
-        }}
+        )}
 
         {/* ============ VERLAUF ============ */}
         {tab === "history" && (
           <LessonHistory allLessons={allLessons} onRetry={onRetryLesson} />
-        }}
+        )}
 
         {/* ============ ERFOLGE ============ */}
         {tab === "badges" && (
@@ -266,11 +252,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
                 </p>
                 <button
                   onClick={handleToggleDemo}
-                  className="px-5 py-2.5 rounded-xl font-semibold transition-all ${
-                    settings.demoMode
-                      ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100"
-                      : "bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100"
-                  }`
+                  className={`px-5 py-2.5 rounded-xl font-semibold transition-all ${settings.demoMode ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100" : "bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100"}`}
                 >
                   {settings.demoMode ? "Zum Appwrite-Modus wechseln" : "Zum Demo-Modus wechseln"}
                 </button>

@@ -147,11 +147,13 @@ function InnerAppContent() {
   }
 
   const [lessons, setLessons] = useState([]);
+  const [lessonsLoading, setLessonsLoading] = useState(true);
   const [activeLesson, setActiveLesson] = useState(null);
   const [view, setView] = useState("skilltree"); // 'skilltree' | 'lesson-in-progress' | 'lesson-result' | 'profile' | 'auth'
   const [showAdmin, setShowAdmin] = useState(false);
   const [authMode, setAuthMode] = useState("login"); // 'login' | 'register'
   const [lessonResult, setLessonResult] = useState(null); // { xpReward, score, heartsRemaining }
+  const [lessonKey, setLessonKey] = useState(0);
 
   // XP/Streak/Hearts/Level aus Profil oder Demo-Werte
   const xp = profile?.xp ?? 0;
@@ -189,6 +191,7 @@ function InnerAppContent() {
   // Lektionen laden (aus Appwrite oder Demo-Fallback)
   // -------------------------------------------------------------------------
   const loadLessons = useCallback(async () => {
+    setLessonsLoading(true);
     try {
       const published = await fetchPublishedLessons();
       if (published && published.length > 0) {
@@ -199,6 +202,8 @@ function InnerAppContent() {
     } catch (err) {
       console.warn("Appwrite nicht verfügbar, verwende Demo-Daten:", err.message);
       setLessons(DEMO_LESSONS);
+    } finally {
+      setLessonsLoading(false);
     }
   }, []);
 
@@ -228,6 +233,7 @@ function InnerAppContent() {
     setActiveLesson(lesson);
     setView("lesson-in-progress");
     setLessonResult(null);
+    setLessonKey((prev) => prev + 1);
   };
 
   // -------------------------------------------------------------------------
@@ -261,18 +267,15 @@ function InnerAppContent() {
         activeLesson.category
       );
     } else {
-      // Demo-Modus: lokaler Abschluss-Eintrag
-      result = {
-        lessonEntry: {
-          lessonId: activeLesson.id,
-          title: activeLesson.title,
-          category: activeLesson.category,
-          completedAt: new Date().toISOString(),
-          score: 100,
-          xpEarned: xpReward,
-          heartsRemaining: 3,
-        },
-      };
+      // Demo-Modus: lokaler Abschluss-Eintrag (XP/Streak/Hearts in localStorage)
+      result = await completeLesson(
+        activeLesson.id,
+        xpReward,
+        100,
+        3,
+        activeLesson.title,
+        activeLesson.category
+      );
     }
     setLessonResult({
       xpReward,
@@ -362,7 +365,15 @@ function InnerAppContent() {
       {renderHeader()}
 
       <main className="max-w-6xl mx-auto px-6 py-8">
-        <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
+        {lessonsLoading && (
+          <div className="text-center py-20">
+            <p className="text-gray-500 text-lg">Lektionen werden geladen...</p>
+          </div>
+        )}
+
+        {!lessonsLoading && (
+          <>
+            <div className="flex flex-col md:flex-row md:items-center justify-between mb-8 gap-4">
           <div>
             <h1 className="text-3xl font-bold text-gray-800">ChemVibe</h1>
             <p className="text-gray-500">Organische Chemie – Lernpfad</p>
@@ -483,6 +494,8 @@ function InnerAppContent() {
             <p className="text-gray-500 text-lg">Keine Lektionen verfügbar.</p>
           </div>
         )}
+        </>
+        )}
       </main>
     </div>
   );
@@ -499,6 +512,7 @@ function InnerAppContent() {
         <main className="max-w-6xl mx-auto px-6 py-8">
           <LessonInProgress
             lesson={activeLesson}
+            lessonKey={lessonKey}
             onComplete={handleChallengeComplete}
             onPause={() => {}}
             onResume={() => {}}

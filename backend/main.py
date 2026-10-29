@@ -592,4 +592,5 @@ async def ingest_scraped_data(request: ScrapedDataRequest):
         "message": "Scraped data received",
         "spider": request.spider,
         "items_received": len(request.items),
+        "scraped_at": request.scraped_at,
     }

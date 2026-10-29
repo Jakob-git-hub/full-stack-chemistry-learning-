@@ -24,16 +24,18 @@ function DidYouKnow({ fact }) {
 // ---------------------------------------------------------------------------
 function ProgressBar({ theoryPct, challengePct }) {
   return (
-    <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
-      <div
-        className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-700"
-        style={{ width: `${Math.max(theoryPct, challengePct)}%` }}
-      />
-    </div>
-    <div className="flex justify-between text-xs text-gray-500 mt-1">
-      <span>Theorie {theoryPct}%</span>
-      <span>Challenge {challengePct}%</span>
-    </div>
+    <>
+      <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
+        <div
+          className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-700"
+          style={{ width: `${Math.max(theoryPct, challengePct)}%` }}
+        ></div>
+      </div>
+      <div className="flex justify-between text-xs text-gray-500 mt-1">
+        <span>Theorie {theoryPct}%</span>
+        <span>Challenge {challengePct}%</span>
+      </div>
+    </>
   );
 }
 
@@ -63,6 +65,7 @@ function HeartsDisplay({ hearts, onLoseHeart }) {
 // ---------------------------------------------------------------------------
 export default function LessonInProgress({
   lesson,
+  lessonKey,
   onComplete,
   onPause,
   onResume,
@@ -189,6 +192,7 @@ export default function LessonInProgress({
                   </span>
                 </div>
                 <MoleculeBuilder
+                  key={lessonKey}
                   challenge={lesson?.challenge}
                   onComplete={handleChallengeComplete}
                   xpReward={30}
