@@ -26,9 +26,9 @@ describe("LessonResult", () => {
   beforeEach(() => {
     vi.clearAllMocks();
     // navigator.share mocken (nicht in jsdom vorhanden)
-    global.navigator.share = vi.fn();
-    global.navigator.clipboard = { writeText: vi.fn().mockResolvedValue() };
-    global.alert = vi.fn();
+    window.navigator.share = vi.fn();
+    window.navigator.clipboard = { writeText: vi.fn().mockResolvedValue() };
+    window.alert = vi.fn();
   });
 
   afterEach(() => {
@@ -74,7 +74,7 @@ describe("LessonResult", () => {
   it("kopiert das Teilen-Ergebnis in die Zwischenablage (Fallback)", () => {
     render(<LessonResult {...defaultProps} />);
     fireEvent.click(screen.getByText(/Ergebnis teilen/));
-    expect(global.navigator.clipboard.writeText).toHaveBeenCalled();
-    expect(global.alert).toHaveBeenCalledWith("Ergebnis in die Zwischenablage kopiert!");
+    expect(window.navigator.clipboard.writeText).toHaveBeenCalled();
+    expect(window.alert).toHaveBeenCalledWith("Ergebnis in die Zwischenablage kopiert!");
   });
 });

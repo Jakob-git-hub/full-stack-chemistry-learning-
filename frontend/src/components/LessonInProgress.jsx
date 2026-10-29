@@ -215,7 +215,7 @@ function renderTheoryContent(theory, lesson) {
   return paragraphs.map((para, i) => {
     const trimmed = para.trim();
     if (trimmed.startsWith("💡") || trimmed.startsWith("Wusstest du")) {
-      const fact = trimmed.replace(/^(💡\s*Wusstest du\s*(schon)?[:\-]?\s*)/i, "");
+      const fact = trimmed.replace(/^(💡\s*Wusstest du\s*(schon)?[:-]?\s*)/i, "");
       return <DidYouKnow key={i} fact={fact} />;
     }
     return (

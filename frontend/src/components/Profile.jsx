@@ -26,6 +26,16 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
     demoMode: true,
   });
 
+  const handleToggleDemo = useCallback(async () => {
+    await updateSettings({ demoMode: !settings.demoMode });
+    setSettings((prev) => ({ ...prev, demoMode: !prev.demoMode }));
+  }, [settings.demoMode, updateSettings]);
+
+  const handleSettingChange = useCallback((key, value) => {
+    setSettings((prev) => ({ ...prev, [key]: value }));
+    updateSettings({ [key]: value });
+  }, [updateSettings]);
+
   if (loading) {
     return (
       <div className="flex h-screen items-center justify-center bg-gray-50">
@@ -57,16 +67,6 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
     .slice(0, 2)
     .join("")
     .toUpperCase() || "U";
-
-  const handleToggleDemo = useCallback(async () => {
-    await updateSettings({ demoMode: !settings.demoMode });
-    setSettings((prev) => ({ ...prev, demoMode: !prev.demoMode }));
-  }, [settings.demoMode, updateSettings]);
-
-  const handleSettingChange = useCallback((key, value) => {
-    setSettings((prev) => ({ ...prev, [key]: value }));
-    updateSettings({ [key]: value });
-  }, [updateSettings]);
 
   const tabs = [
     { id: "overview", label: "Übersicht", icon: "👤" },

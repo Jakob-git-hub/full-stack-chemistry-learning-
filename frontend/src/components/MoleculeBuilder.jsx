@@ -19,16 +19,8 @@ const GRID_SIZE = 40;
 // ---------------------------------------------------------------------------
 // Hilfsfunktionen
 // ---------------------------------------------------------------------------
-function distance(x1, y1, x2, y2) {
-  return Math.sqrt((x2 - x1) ** 2 + (y2 - y1) ** 2);
-}
-
 function snapToGrid(value) {
   return Math.round(value / GRID_SIZE) * GRID_SIZE;
-}
-
-function atomsEqual(a, b) {
-  return a.type === b.type;
 }
 
 function countAtomsByType(atoms) {
@@ -87,7 +79,7 @@ export default function MoleculeBuilder({
         y: p.y ?? 200,
         locked: true,
       }));
-      setAtoms(initialAtoms);
+      setTimeout(() => setAtoms(initialAtoms), 0);
     }
   }, [preplaced_atoms]);
 

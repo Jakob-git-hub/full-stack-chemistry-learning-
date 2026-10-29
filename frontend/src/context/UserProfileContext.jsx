@@ -201,7 +201,8 @@ export function UserProfileProvider({ children, user }) {
   }, [user, isAppwriteConfigured, loadDemoProfile]);
 
   useEffect(() => {
-    loadProfile();
+    const timer = setTimeout(() => loadProfile(), 0);
+    return () => clearTimeout(timer);
   }, [loadProfile]);
 
   // -------------------------------------------------------------------------
