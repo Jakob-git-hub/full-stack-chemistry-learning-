@@ -704,3 +704,29 @@ def test_concurrent_lesson_generation(mock_llm, zyte_mock, appwrite_db):
     for response in responses:
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["status"] == "draft"
+
+
+def test_scraped_data_endpoint():
+    response = client.post(
+        "/api/scraped-data",
+        json={
+            "spider": "chemistry",
+            "items": [{"title": "Nukleophile Substitution", "url": "https://example.com"}],
+            "scraped_at": "2026-10-28T19:32:25Z",
+        },
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["items_received"] == 1
+
+
+def test_scraped_data_alias_endpoint():
+    response = client.post(
+        "/scraped-data",
+        json={"spider": "chemistry", "items": [], "scraped_at": None},
+    )
+    assert response.status_code == 201
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["items_received"] == 0

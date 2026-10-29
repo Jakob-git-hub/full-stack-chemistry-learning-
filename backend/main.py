@@ -562,18 +562,35 @@ async def health():
     return {"status": "healthy", "service": "chemvibe-backend"}
 
 
+# ---------------------------------------------------------------------------
+# Scraped-data ingestion endpoint (used by the Zyte spider)
+# ---------------------------------------------------------------------------
 class ScrapedDataRequest(BaseModel):
-    spider: str
-    items: List[Dict[str, Any]]
-    scraped_at: str
+    spider: str = Field(..., description="Name of the spider that produced the items")
+    items: List[Dict[str, Any]] = Field(..., description="Scraped items")
+    scraped_at: Optional[str] = Field(None, description="ISO timestamp when scraping occurred")
 
 
 @app.post("/api/scraped-data", status_code=status.HTTP_201_CREATED)
-async def receive_scraped_data(payload: ScrapedDataRequest):
-    """Empfängt scraped Daten vom ChemSpider und speichert sie als Lektions-Entwürfe."""
+@app.post("/scraped-data", status_code=status.HTTP_201_CREATED)
+async def ingest_scraped_data(request: ScrapedDataRequest):
+    """Receives scraped items from the Zyte spider. Logs them and returns success."""
+    import logging
+
+    logger = logging.getLogger("chemvibe.scraped_data")
+    logger.info(
+        "Received scraped data from spider=%s item_count=%d scraped_at=%s",
+        request.spider,
+        len(request.items),
+        request.scraped_at,
+    )
+    for item in request.items:
+        logger.debug("Scraped item: %s", item)
+
     return {
-        "status": "accepted",
-        "spider": payload.spider,
-        "items_received": len(payload.items),
-        "scraped_at": payload.scraped_at,
+        "status": "ok",
+        "message": "Scraped data received",
+        "spider": request.spider,
+        "items_received": len(request.items),
+        "scraped_at": request.scraped_at,
     }
