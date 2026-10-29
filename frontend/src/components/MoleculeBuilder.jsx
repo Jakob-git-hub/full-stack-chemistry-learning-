@@ -434,7 +434,6 @@ export default function MoleculeBuilder({
           onMouseUp={() => {
             setDraggingAtomId(null);
           }}
-          }}
         >
           <defs>
             <filter id="atomShadow" x="-20%" y="-20%" width="140%" height="140%">
