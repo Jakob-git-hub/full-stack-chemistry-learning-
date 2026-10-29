@@ -2,14 +2,19 @@ import { Client, Databases, ID, Query } from "appwrite";
 
 // ---------------------------------------------------------------------------
 // Appwrite Web SDK Konfiguration
-// Project: ChemLeaner (6ae104eb001d990f63e6)
-// Endpoint: https://fra.cloud.appwrite.io/v1
+// Reads endpoint and project ID from Vite env vars, falling back to the
+// defaults defined in frontend/.env.example when the env vars are not set.
 // ---------------------------------------------------------------------------
 const client = new Client();
 
 client
-  .setEndpoint("https://fra.cloud.appwrite.io/v1")
-  .setProject("6ae104eb001d990f63e6");
+  .setEndpoint(
+    import.meta.env.VITE_APPWRITE_ENDPOINT ||
+      "https://fra.cloud.appwrite.io/v1"
+  )
+  .setProject(
+    import.meta.env.VITE_APPWRITE_PROJECT_ID || "6ae104eb001d990f63e6"
+  );
 
 const databases = new Databases(client);
 
