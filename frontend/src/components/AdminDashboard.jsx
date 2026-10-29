@@ -29,7 +29,8 @@ export default function AdminDashboard({ onClose }) {
   }, []);
 
   useEffect(() => {
-    loadDrafts();
+    const timer = setTimeout(() => loadDrafts(), 0);
+    return () => clearTimeout(timer);
   }, [loadDrafts]);
 
   // -------------------------------------------------------------------------

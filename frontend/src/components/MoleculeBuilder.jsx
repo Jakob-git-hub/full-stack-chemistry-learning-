@@ -79,7 +79,7 @@ export default function MoleculeBuilder({
         y: p.y ?? 200,
         locked: true,
       }));
-      setAtoms(initialAtoms);
+      setTimeout(() => setAtoms(initialAtoms), 0);
     }
   }, [preplaced_atoms]);
 

@@ -12,28 +12,29 @@ Architektur (Agenten-Workflow):
 Alle API-Schlüssel und Konfigurationen über os.getenv().
 """
 
-import os
 import json
+import os
 import re
-from datetime import datetime, timezone
-from typing import Optional, List, Dict, Any
+from datetime import UTC, datetime
+from typing import Any
 
 from dotenv import load_dotenv
+
 load_dotenv()
 
-from fastapi import FastAPI, HTTPException, status
-from fastapi.middleware.cors import CORSMiddleware
-from pydantic import BaseModel, Field
+import httpx
 from appwrite.client import Client
-from appwrite.services.databases import Databases
 from appwrite.id import ID
 from appwrite.query import Query as AppwriteQuery
-import httpx
+from appwrite.services.databases import Databases
+from fastapi import FastAPI, HTTPException, status
+from fastapi.middleware.cors import CORSMiddleware
+from langchain_core.messages import HumanMessage, SystemMessage
+from langchain_core.output_parsers import StrOutputParser
 
 # LangChain imports
 from langchain_openai import ChatOpenAI
-from langchain_core.messages import SystemMessage, HumanMessage
-from langchain_core.output_parsers import StrOutputParser
+from pydantic import BaseModel, Field
 
 # ---------------------------------------------------------------------------
 # Environment configuration
@@ -91,7 +92,7 @@ def get_llm(temperature: float = 0.7) -> ChatOpenAI:
 # ---------------------------------------------------------------------------
 class GenerateLessonRequest(BaseModel):
     topic: str = Field(..., description="Chemie-Thema, z.B. 'Nukleophile Substitution'")
-    difficulty: Optional[str] = Field("medium", description="easy | medium | hard")
+    difficulty: str | None = Field("medium", description="easy | medium | hard")
 
 
 class LessonResponse(BaseModel):
@@ -106,11 +107,11 @@ class Challenge(BaseModel):
     type: str = "molecule_builder"
     question: str
     difficulty: str
-    target_smiles: Optional[str] = None
-    target_atoms: Optional[List[Dict[str, Any]]] = None
-    target_bonds: Optional[int] = None
-    preplaced_atoms: Optional[List[Dict[str, Any]]] = None
-    palette_atoms: List[Dict[str, str]]
+    target_smiles: str | None = None
+    target_atoms: list[dict[str, Any]] | None = None
+    target_bonds: int | None = None
+    preplaced_atoms: list[dict[str, Any]] | None = None
+    palette_atoms: list[dict[str, str]]
 
 
 class LessonStructure(BaseModel):
@@ -138,7 +139,7 @@ def get_databases() -> Databases:
 # ---------------------------------------------------------------------------
 # Schritt 1: LangChain LLM plant das Scraping
 # ---------------------------------------------------------------------------
-async def plan_scraping(topic: str) -> List[str]:
+async def plan_scraping(topic: str) -> list[str]:
     """
     Das LangChain LLM entscheidet, welche URLs über Zyte abgerufen werden sollen.
     Gibt eine Liste von URLs zurück.
@@ -166,10 +167,10 @@ Keine Erklärungen, kein Markdown, nur das JSON-Array.
         ]
         chain = llm | StrOutputParser()
         content = chain.invoke(messages)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LangChain LLM-Fehler bei der Planung: {str(exc)}",
+            detail=f"LangChain LLM-Fehler bei der Planung: {exc!s}",
         )
 
     # JSON-Array aus der Antwort extrahieren
@@ -192,7 +193,7 @@ Keine Erklärungen, kein Markdown, nur das JSON-Array.
 # ---------------------------------------------------------------------------
 # Schritt 2: Zyte Daten holen (httpx, da LangChain kein natives Zyte-Tool hat)
 # ---------------------------------------------------------------------------
-async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
+async def fetch_with_zyte(urls: list[str]) -> list[dict[str, Any]]:
     """
     Ruft die Zyte-Extraktions-API für jede URL auf und gibt die Rohdaten zurück.
     """
@@ -202,7 +203,7 @@ async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
             detail="ZYTE_API_KEY ist nicht konfiguriert",
         )
 
-    results: List[Dict[str, Any]] = []
+    results: list[dict[str, Any]] = []
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         for url in urls:
@@ -229,7 +230,7 @@ async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
                             "error": f"Zyte returned {response.status_code}: {response.text}",
                         }
                     )
-            except Exception as exc:
+            except Exception as exc:  # noqa: BLE001
                 results.append(
                     {
                         "url": url,
@@ -245,7 +246,7 @@ async def fetch_with_zyte(urls: List[str]) -> List[Dict[str, Any]]:
 # Schritt 3: LangChain LLM strukturiert in JSON-Lektion
 # ---------------------------------------------------------------------------
 async def structure_lesson(
-    topic: str, raw_data: List[Dict[str, Any]], difficulty: str
+    topic: str, raw_data: list[dict[str, Any]], difficulty: str
 ) -> LessonStructure:
     """
     Das LangChain LLM analysiert die gescrapten Rohdaten und generiert eine
@@ -325,10 +326,10 @@ Gesammelte Rohdaten:
         ]
         chain = llm | StrOutputParser()
         content = chain.invoke(messages)
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LangChain LLM-Fehler bei der Strukturierung: {str(exc)}",
+            detail=f"LangChain LLM-Fehler bei der Strukturierung: {exc!s}",
         )
 
     # JSON aus der LLM-Antwort extrahieren
@@ -376,8 +377,8 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
         "challenge": lesson.challenge.model_dump(),
         "status": "draft",
         "topic": topic,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
+        "created_at": datetime.now(UTC).isoformat(),
+        "updated_at": datetime.now(UTC).isoformat(),
     }
 
     try:
@@ -388,10 +389,10 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
             data=document,
         )
         return result["$id"]
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Appwrite-Fehler beim Speichern: {str(exc)}",
+            detail=f"Appwrite-Fehler beim Speichern: {exc!s}",
         )
 
 
@@ -449,12 +450,12 @@ async def generate_agent_lesson(request: GenerateLessonRequest):
         title=lesson.title,
         category=lesson.category,
         status="draft",
-        created_at=datetime.now(timezone.utc).isoformat(),
+        created_at=datetime.now(UTC).isoformat(),
     )
 
 
-@app.get("/lessons", response_model=List[LessonResponse])
-async def list_lessons(status_filter: Optional[str] = None):
+@app.get("/lessons", response_model=list[LessonResponse])
+async def list_lessons(status_filter: str | None = None):
     """Listet alle Lektionen auf, optional gefiltert nach Status."""
     if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
         raise HTTPException(
@@ -486,14 +487,14 @@ async def list_lessons(status_filter: Optional[str] = None):
                 )
             )
         return lessons
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Appwrite-Fehler: {str(exc)}",
+            detail=f"Appwrite-Fehler: {exc!s}",
         )
 
 
-@app.get("/lessons/drafts", response_model=List[LessonResponse])
+@app.get("/lessons/drafts", response_model=list[LessonResponse])
 async def list_drafts():
     """Listet alle Lektionen mit Status 'draft' (für das Admin-Dashboard)."""
     return await list_lessons(status_filter="draft")
@@ -517,10 +518,10 @@ async def get_lesson(lesson_id: str):
             document_id=lesson_id,
         )
         return doc
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Lektion nicht gefunden: {str(exc)}",
+            detail=f"Lektion nicht gefunden: {exc!s}",
         )
 
 
@@ -542,7 +543,7 @@ async def publish_lesson(lesson_id: str):
             document_id=lesson_id,
             data={
                 "status": "published",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
+                "updated_at": datetime.now(UTC).isoformat(),
             },
         )
         return {
@@ -550,10 +551,10 @@ async def publish_lesson(lesson_id: str):
             "status": doc["status"],
             "message": "Lektion veröffentlicht",
         }
-    except Exception as exc:
+    except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Lektion nicht gefunden oder konnte nicht veröffentlicht werden: {str(exc)}",
+            detail=f"Lektion nicht gefunden oder konnte nicht veröffentlicht werden: {exc!s}",
         )
 
 
@@ -567,8 +568,8 @@ async def health():
 # ---------------------------------------------------------------------------
 class ScrapedDataRequest(BaseModel):
     spider: str = Field(..., description="Name of the spider that produced the items")
-    items: List[Dict[str, Any]] = Field(..., description="Scraped items")
-    scraped_at: Optional[str] = Field(None, description="ISO timestamp when scraping occurred")
+    items: list[dict[str, Any]] = Field(..., description="Scraped items")
+    scraped_at: str | None = Field(None, description="ISO timestamp when scraping occurred")
 
 
 @app.post("/api/scraped-data", status_code=status.HTTP_201_CREATED)

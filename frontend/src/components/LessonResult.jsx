@@ -75,7 +75,7 @@ function AnimatedCounter({ target, duration = 1200, prefix = "+" }) {
 
   useEffect(() => {
     if (target <= 0) {
-      setValue(0);
+      setTimeout(() => setValue(0), 0);
       return;
     }
     const start = 0;
@@ -124,7 +124,7 @@ export default function LessonResult({
   // XP einmalig vergeben + Streak erhöhen beim Mount
   useEffect(() => {
     if (xpAwarded) return;
-    setShowConfetti(true);
+    setTimeout(() => setShowConfetti(true), 0);
     addXp(xpReward).then((result) => {
       if (result) {
         setLeveledUp(result.leveledUp);

@@ -131,18 +131,9 @@ function InnerAppContent() {
     isLessonCompleted,
   } = useUserProfile();
 
-  // Loading state for profile
-  if (profileLoading) {
-    return (
-      <div className="flex h-screen items-center justify-center bg-gray-50">
-        <div className="flex flex-col items-center gap-3">
-          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
-          <p className="text-gray-500 font-medium">Lade Profil...</p>
-        </div>
-      </div>
-    );
-  }
-
+  // -------------------------------------------------------------------------
+  // State (alle Hooks vor frühen Returns, damit React-Hooks-Regeln eingehalten werden)
+  // -------------------------------------------------------------------------
   const [lessons, setLessons] = useState([]);
   const [lessonsLoading, setLessonsLoading] = useState(true);
   const [activeLesson, setActiveLesson] = useState(null);
@@ -152,16 +143,11 @@ function InnerAppContent() {
   const [lessonResult, setLessonResult] = useState(null); // { xpReward, score, heartsRemaining }
   const [lessonKey, setLessonKey] = useState(0);
 
-  // XP/Streak/Hearts/Level aus Profil oder Demo-Werte
-  const xp = profile?.xp ?? 0;
-  const streak = profile?.streak ?? 0;
-  const hearts = profile?.hearts ?? 3;
-  const level = profile?.level ?? 1;
+  const adminKeyRef = useRef({ ctrl: false, shift: false, a: false });
 
   // -------------------------------------------------------------------------
   // Admin Dashboard mit Tastenkombination öffnen (Ctrl+Shift+A)
   // -------------------------------------------------------------------------
-  const adminKeyRef = useRef({ ctrl: false, shift: false, a: false });
   useEffect(() => {
     const handleKeyDown = (e) => {
       if (e.key === "Control") adminKeyRef.current.ctrl = true;
@@ -205,7 +191,8 @@ function InnerAppContent() {
   }, []);
 
   useEffect(() => {
-    loadLessons();
+    const timer = setTimeout(() => loadLessons(), 0);
+    return () => clearTimeout(timer);
   }, [loadLessons]);
 
   // -------------------------------------------------------------------------
@@ -222,6 +209,24 @@ function InnerAppContent() {
     }
     return lessons[0];
   }, [lessons, activeLesson, isLessonCompleted]);
+
+  // Loading state for profile
+  if (profileLoading) {
+    return (
+      <div className="flex h-screen items-center justify-center bg-gray-50">
+        <div className="flex flex-col items-center gap-3">
+          <div className="w-12 h-12 border-4 border-indigo-200 border-t-indigo-600 rounded-full animate-spin"></div>
+          <p className="text-gray-500 font-medium">Lade Profil...</p>
+        </div>
+      </div>
+    );
+  }
+
+  // XP/Streak/Hearts/Level aus Profil oder Demo-Werte
+  const xp = profile?.xp ?? 0;
+  const streak = profile?.streak ?? 0;
+  const hearts = profile?.hearts ?? 3;
+  const level = profile?.level ?? 1;
 
   // -------------------------------------------------------------------------
   // Lektion auswählen (öffnet During-Lesson View)

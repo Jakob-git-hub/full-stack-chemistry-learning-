@@ -40,7 +40,8 @@ export function AuthProvider({ children }) {
   }, [account, isAppwriteConfigured]);
 
   useEffect(() => {
-    checkSession();
+    const timer = setTimeout(() => checkSession(), 0);
+    return () => clearTimeout(timer);
   }, [checkSession]);
 
   // -------------------------------------------------------------------------
