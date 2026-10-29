@@ -167,7 +167,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
                   <div
                     className="h-full bg-gradient-to-r from-amber-400 to-rose-400 transition-all duration-1000"
                     style={{ width: `${dailyGoal.pct}%` }}
-                  />
+                  ></div>
                 </div>
                 <div className="flex justify-between text-xs text-gray-500 mt-1">
                   <span>{dailyGoal.current} / {dailyGoal.target} XP heute</span>
@@ -206,12 +206,12 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
               )}
             </div>
           </div>
-        }}
+        )}
 
         {/* ============ VERLAUF ============ */}
         {tab === "history" && (
           <LessonHistory allLessons={allLessons} onRetry={onRetryLesson} />
-        }}
+        )}
 
         {/* ============ ERFOLGE ============ */}
         {tab === "badges" && (
@@ -252,11 +252,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
                 </p>
                 <button
                   onClick={handleToggleDemo}
-                  className="px-5 py-2.5 rounded-xl font-semibold transition-all ${
-                    settings.demoMode
-                      ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100"
-                      : "bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100"
-                  }`
+                  className={`px-5 py-2.5 rounded-xl font-semibold transition-all ${settings.demoMode ? "bg-rose-50 text-rose-600 border border-rose-100 hover:bg-rose-100" : "bg-indigo-50 text-indigo-600 border border-indigo-100 hover:bg-indigo-100"}`}
                 >
                   {settings.demoMode ? "Zum Appwrite-Modus wechseln" : "Zum Demo-Modus wechseln"}
                 </button>

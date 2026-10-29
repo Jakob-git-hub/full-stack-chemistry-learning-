@@ -1,5 +1,6 @@
 import { describe, it, expect, vi, beforeEach } from "vitest";
 import { render, screen, fireEvent } from "@testing-library/react";
+import "@testing-library/jest-dom";
 import App from "./App";
 
 // Mock appwrite module
@@ -8,6 +9,9 @@ vi.mock("./services/appwrite", () => ({
   APPWRITE_CONFIG: {
     DATABASE_ID: "chemvibe",
     COLLECTION_ID: "lessons",
+  },
+  client: {
+    config: { project: "" },
   },
 }));
 

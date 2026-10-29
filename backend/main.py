@@ -560,3 +560,20 @@ async def publish_lesson(lesson_id: str):
 @app.get("/health")
 async def health():
     return {"status": "healthy", "service": "chemvibe-backend"}
+
+
+class ScrapedDataRequest(BaseModel):
+    spider: str
+    items: List[Dict[str, Any]]
+    scraped_at: str
+
+
+@app.post("/api/scraped-data", status_code=status.HTTP_201_CREATED)
+async def receive_scraped_data(payload: ScrapedDataRequest):
+    """Empfängt scraped Daten vom ChemSpider und speichert sie als Lektions-Entwürfe."""
+    return {
+        "status": "accepted",
+        "spider": payload.spider,
+        "items_received": len(payload.items),
+        "scraped_at": payload.scraped_at,
+    }
