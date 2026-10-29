@@ -63,6 +63,7 @@ export default function MoleculeBuilder({
   const [bonds, setBonds] = useState([]);
   const [selectedAtomId, setSelectedAtomId] = useState(null);
   const [bondMode, setBondMode] = useState(false);
+  const [draggedAtomId, setDraggedAtomId] = useState(null);
   const [validationResult, setValidationResult] = useState(null); // null | "correct" | "incorrect"
   const [isValidating, setIsValidating] = useState(false);
   const [xpAwarded, setXpAwarded] = useState(false);
@@ -88,17 +89,26 @@ export default function MoleculeBuilder({
   // -------------------------------------------------------------------------
   const addAtom = useCallback(
     (type, x, y) => {
+      // Wenn keine Koordinaten angegeben, platziere den Atom nicht stapelnd
+      // (verschiebe ihn leicht vom letzten Atom oder in die Mitte)
+      let placeX = x;
+      let placeY = y;
+      if (x === undefined || y === undefined) {
+        const last = atoms[atoms.length - 1];
+        placeX = last ? last.x + 60 : CANVAS_WIDTH / 2;
+        placeY = last ? last.y : CANVAS_HEIGHT / 2;
+      }
       const newAtom = {
         id: `atom-${Date.now()}-${Math.random().toString(36).slice(2, 5)}`,
         type,
-        x: snapToGrid(x),
-        y: snapToGrid(y),
+        x: snapToGrid(placeX),
+        y: snapToGrid(placeY),
         locked: false,
       };
       setAtoms((prev) => [...prev, newAtom]);
       setSelectedAtomId(newAtom.id);
     },
-    []
+    [atoms]
   );
 
   // -------------------------------------------------------------------------
@@ -240,13 +250,16 @@ export default function MoleculeBuilder({
           e.stopPropagation();
           if (bondMode && selectedAtomId && selectedAtomId !== atom.id) {
             toggleBond(selectedAtomId, atom.id);
+          } else if (!isLocked) {
+            setSelectedAtomId(atom.id);
+            setDraggedAtomId(atom.id);
+            setBondMode(false);
           } else {
             setSelectedAtomId(atom.id);
-            setBondMode(false);
           }
         }}
         onMouseMove={(e) => {
-          if (!isLocked && e.buttons === 1) {
+          if (draggedAtomId === atom.id && !isLocked) {
             const rect = svgRef.current?.getBoundingClientRect();
             if (rect) {
               const newX = snapToGrid(e.clientX - rect.left);
@@ -329,7 +342,7 @@ export default function MoleculeBuilder({
           return (
             <button
               key={atomType.type}
-              onClick={() => addAtom(atomType.type, 100, 100)}
+              onClick={() => addAtom(atomType.type)}
               className={`w-12 h-12 rounded-xl flex items-center justify-center border-2 transition-all ${
                 selectedAtomId && bondMode
                   ? "border-yellow-400 bg-yellow-50"
@@ -412,7 +425,11 @@ export default function MoleculeBuilder({
             if (e.target === e.currentTarget) {
               setSelectedAtomId(null);
               setBondMode(false);
+              setDraggedAtomId(null);
             }
+          }}
+          onMouseUp={() => {
+            setDraggedAtomId(null);
           }}
         >
           <defs>

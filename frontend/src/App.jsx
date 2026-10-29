@@ -6,6 +6,7 @@ import LessonInProgress from "./components/LessonInProgress";
 import LessonResult from "./components/LessonResult";
 import Profile from "./components/Profile";
 import AdminDashboard from "./components/AdminDashboard";
+import AdminLogin from "./components/AdminLogin";
 import AuthForm from "./components/AuthForm";
 import UserMenu from "./components/UserMenu";
 import { fetchPublishedLessons } from "./services/appwrite";
@@ -139,6 +140,8 @@ function InnerAppContent() {
   const [activeLesson, setActiveLesson] = useState(null);
   const [view, setView] = useState("skilltree"); // 'skilltree' | 'lesson-in-progress' | 'lesson-result' | 'profile' | 'auth'
   const [showAdmin, setShowAdmin] = useState(false);
+  const [isAdmin, setIsAdmin] = useState(false);
+  const [adminMode, setAdminMode] = useState("login"); // 'login' | 'dashboard'
   const [authMode, setAuthMode] = useState("login"); // 'login' | 'register'
   const [lessonResult, setLessonResult] = useState(null); // { xpReward, score, heartsRemaining }
   const [lessonKey, setLessonKey] = useState(0);
@@ -154,7 +157,12 @@ function InnerAppContent() {
       if (e.key === "Shift") adminKeyRef.current.shift = true;
       if (e.key.toLowerCase() === "a") adminKeyRef.current.a = true;
       if (adminKeyRef.current.ctrl && adminKeyRef.current.shift && adminKeyRef.current.a) {
-        setShowAdmin(true);
+        if (isAdmin) {
+          setShowAdmin(true);
+        } else {
+          setAdminMode("login");
+          setShowAdmin(true);
+        }
       }
     };
     const handleKeyUp = (e) => {
@@ -402,7 +410,14 @@ function InnerAppContent() {
         <div className="flex items-center justify-between mb-6">
           <h2 className="text-2xl font-bold text-gray-800">Lektionen entdecken</h2>
           <button
-            onClick={() => setShowAdmin(true)}
+            onClick={() => {
+              if (isAdmin) {
+                setShowAdmin(true);
+              } else {
+                setAdminMode("login");
+                setShowAdmin(true);
+              }
+            }}
             className="px-4 py-2 rounded-xl font-semibold bg-gray-100 text-gray-700 border border-gray-200 hover:bg-gray-200 text-sm flex items-center gap-2"
             title="Admin Dashboard (Ctrl+Shift+A)"
           >
@@ -581,10 +596,29 @@ function InnerAppContent() {
   );
 
   // -------------------------------------------------------------------------
-  // Admin Dashboard
+  // Admin Dashboard / Admin-Login
   // -------------------------------------------------------------------------
   if (showAdmin) {
-    return <AdminDashboard onClose={() => setShowAdmin(false)} />;
+    if (isAdmin) {
+      return (
+        <AdminDashboard
+          onClose={() => {
+            setShowAdmin(false);
+            setIsAdmin(false);
+            setAdminMode("login");
+          }}
+        />
+      );
+    }
+    return (
+      <AdminLogin
+        onSuccess={() => {
+          setIsAdmin(true);
+          setAdminMode("dashboard");
+        }}
+        onBack={() => setShowAdmin(false)}
+      />
+    );
   }
 
   // -------------------------------------------------------------------------

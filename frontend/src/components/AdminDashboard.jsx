@@ -307,6 +307,12 @@ export default function AdminDashboard({ onClose }) {
             >
               {loading ? "⟳" : "🔄 Aktualisieren"}
             </button>
+            <button
+              onClick={onClose}
+              className="px-4 py-2 rounded-lg font-semibold bg-gray-100 text-gray-700 hover:bg-gray-200 border border-gray-200"
+            >
+              Admin-Logout
+            </button>
           </div>
         </div>
       </header>
