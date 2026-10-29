@@ -12,11 +12,14 @@ Architektur (Agenten-Workflow):
 Alle API-Schlüssel und Konfigurationen über os.getenv().
 """
 
+import asyncio
 import json
 import os
 import re
 from datetime import datetime, timezone
 from typing import Any, Optional
+
+from pydantic import ValidationError
 
 from dotenv import load_dotenv
 
@@ -137,6 +140,34 @@ def get_databases() -> Databases:
 
 
 # ---------------------------------------------------------------------------
+# Helper: run synchronous LLM call with a timeout in a worker thread
+# ---------------------------------------------------------------------------
+LLM_TIMEOUT_SECONDS = 45
+
+
+async def run_llm_with_timeout(chain, messages) -> str:
+    """Führt einen synchronen LangChain-LLM-Aufruf mit Timeout in einem Thread aus."""
+
+    def _invoke():
+        return chain.invoke(messages)
+
+    try:
+        return await asyncio.wait_for(
+            asyncio.to_thread(_invoke), timeout=LLM_TIMEOUT_SECONDS
+        )
+    except asyncio.TimeoutError:
+        raise HTTPException(
+            status_code=status.HTTP_504_GATEWAY_TIMEOUT,
+            detail="LLM-Aufruf hat das Timeout überschritten",
+        )
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_502_BAD_GATEWAY,
+            detail=f"LangChain LLM-Fehler: {exc!s}",
+        )
+
+
+# ---------------------------------------------------------------------------
 # Schritt 1: LangChain LLM plant das Scraping
 # ---------------------------------------------------------------------------
 async def plan_scraping(topic: str) -> list[str]:
@@ -160,18 +191,12 @@ Keine Erklärungen, kein Markdown, nur das JSON-Array.
 
     user_prompt = f"Thema: {topic}"
 
-    try:
-        messages = [
-            SystemMessage(content=system_prompt),
-            HumanMessage(content=user_prompt),
-        ]
-        chain = llm | StrOutputParser()
-        content = chain.invoke(messages)
-    except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LangChain LLM-Fehler bei der Planung: {exc!s}",
-        )
+    messages = [
+        SystemMessage(content=system_prompt),
+        HumanMessage(content=user_prompt),
+    ]
+    chain = llm | StrOutputParser()
+    content = await run_llm_with_timeout(chain, messages)
 
     # JSON-Array aus der Antwort extrahieren
     try:
@@ -325,7 +350,9 @@ Gesammelte Rohdaten:
             HumanMessage(content=user_prompt),
         ]
         chain = llm | StrOutputParser()
-        content = chain.invoke(messages)
+        content = await run_llm_with_timeout(chain, messages)
+    except HTTPException:
+        raise
     except Exception as exc:  # noqa: BLE001
         raise HTTPException(
             status_code=status.HTTP_502_BAD_GATEWAY,
@@ -351,7 +378,13 @@ Gesammelte Rohdaten:
                 detail="LangChain LLM hat kein valides JSON zurückgegeben",
             )
 
-    return LessonStructure(**lesson_data)
+    try:
+        return LessonStructure(**lesson_data)
+    except ValidationError as exc:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"LLM-Antwort entspricht nicht dem erwarteten Schema: {exc!s}",
+        )
 
 
 # ---------------------------------------------------------------------------
@@ -431,25 +464,33 @@ async def generate_agent_lesson(request: GenerateLessonRequest):
             detail="Topic darf nicht leer sein",
         )
 
-    # Schritt 1: LangChain LLM plant das Scraping
-    urls = await plan_scraping(topic)
+    try:
+        # Schritt 1: LangChain LLM plant das Scraping
+        urls = await plan_scraping(topic)
 
-    # Schritt 2: Zyte holt die Daten
-    raw_data = await fetch_with_zyte(urls)
+        # Schritt 2: Zyte holt die Daten
+        raw_data = await fetch_with_zyte(urls)
 
-    # Schritt 3: LangChain LLM strukturiert in JSON-Lektion
-    lesson = await structure_lesson(topic, raw_data, request.difficulty)
+        # Schritt 3: LangChain LLM strukturiert in JSON-Lektion
+        lesson = await structure_lesson(topic, raw_data, request.difficulty)
 
-    # Schritt 4: In Appwrite als Draft speichern
-    doc_id = save_lesson_to_appwrite(lesson, topic)
+        # Schritt 4: In Appwrite als Draft speichern
+        doc_id = save_lesson_to_appwrite(lesson, topic)
 
-    return LessonResponse(
-        id=doc_id,
-        title=lesson.title,
-        category=lesson.category,
-        status="draft",
-        created_at=datetime.now(timezone.utc).isoformat(),
-    )
+        return LessonResponse(
+            id=doc_id,
+            title=lesson.title,
+            category=lesson.category,
+            status="draft",
+            created_at=datetime.now(timezone.utc).isoformat(),
+        )
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Unerwarteter Fehler bei der Lektions-Generierung: {exc!s}",
+        )
 
 
 @app.get("/lessons", response_model=list[LessonResponse])
