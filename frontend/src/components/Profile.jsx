@@ -3,6 +3,7 @@ import { useUserProfile } from "../context/UserProfileContext";
 import LessonHistory from "./LessonHistory";
 import Badges from "./Badges";
 import AchievementBadge from "./AchievementBadge";
+import XPBar from "./XPBar";
 
 // ---------------------------------------------------------------------------
 // Profil-Bereich (Übersicht, Verlauf, Erfolge, Einstellungen)
@@ -48,9 +49,6 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
     (sum, e) => sum + (typeof e === "string" ? 0 : e.xpEarned || 0),
     0
   );
-  const xpForNextLevel = (level * 100) - xp;
-  const levelPct = Math.round(((xp % 100) / 100) * 100);
-
   const dailyGoal = getDailyGoalProgress();
 
   const initials = (profile.userId || "U")
@@ -157,19 +155,7 @@ export default function Profile({ allLessons = [], onRetryLesson, onBack }) {
               </div>
 
               {/* XP-Bar */}
-              <div className="space-y-3">
-                <div className="flex justify-between text-sm font-semibold text-gray-700 mb-1">
-                  <span>Level {level}</span>
-                  <span>{xpForNextLevel} XP bis Level {level + 1}</span>
-                </div>
-                <div className="w-full bg-gray-100 rounded-full h-3 overflow-hidden border border-gray-200">
-                  <div
-                    className="h-full bg-gradient-to-r from-indigo-500 to-emerald-500 transition-all duration-1000"
-                    style={{ width: `${levelPct}%` }}
-                  ></div>
-                </div>
-                <p className="text-xs text-gray-500">{levelPct}% zum nächsten Level</p>
-              </div>
+              <XPBar level={level} xp={xp} />
 
               {/* Tagesziel */}
               <div className="mt-6 p-5 rounded-2xl bg-amber-50 border border-amber-100">
