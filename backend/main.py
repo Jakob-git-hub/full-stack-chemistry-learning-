@@ -377,8 +377,6 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
         "challenge": lesson.challenge.model_dump(),
         "status": "draft",
         "topic": topic,
-        "created_at": datetime.now(timezone.utc).isoformat(),
-        "updated_at": datetime.now(timezone.utc).isoformat(),
     }
 
     try:
@@ -543,7 +541,6 @@ async def publish_lesson(lesson_id: str):
             document_id=lesson_id,
             data={
                 "status": "published",
-                "updated_at": datetime.now(timezone.utc).isoformat(),
             },
         )
         return {
