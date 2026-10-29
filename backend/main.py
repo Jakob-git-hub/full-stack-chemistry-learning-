@@ -49,8 +49,8 @@ ZYTE_API_KEY = os.getenv("ZYTE_API_KEY", "")
 ZYTE_API_URL = os.getenv("ZYTE_API_URL", "https://api.zyte.com/v1/extract")
 
 LLM_API_KEY = os.getenv("LLM_API_KEY", "")
-LLM_API_URL = os.getenv("LLM_API_URL", "https://api.openai.com/v1")
-LLM_MODEL = os.getenv("LLM_MODEL", "gpt-4o-mini")
+LLM_API_URL = os.getenv("LLM_API_URL", "https://integrate.api.nvidia.com/v1")
+LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3.5-super-49b-v1")
 
 # ---------------------------------------------------------------------------
 # FastAPI application
