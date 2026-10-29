@@ -62,6 +62,7 @@ export default function MoleculeBuilder({
   const [atoms, setAtoms] = useState([]);
   const [bonds, setBonds] = useState([]);
   const [selectedAtomId, setSelectedAtomId] = useState(null);
+  const [draggingAtomId, setDraggingAtomId] = useState(null);
   const [bondMode, setBondMode] = useState(false);
   const [validationResult, setValidationResult] = useState(null); // null | "correct" | "incorrect"
   const [isValidating, setIsValidating] = useState(false);
@@ -231,6 +232,7 @@ export default function MoleculeBuilder({
     const typeInfo = ATOM_TYPES[atom.type] || ATOM_TYPES.carbon;
     const isSelected = selectedAtomId === atom.id;
     const isLocked = atom.locked;
+    const isDragging = draggingAtomId === atom.id;
 
     return (
       <g
@@ -240,22 +242,14 @@ export default function MoleculeBuilder({
           e.stopPropagation();
           if (bondMode && selectedAtomId && selectedAtomId !== atom.id) {
             toggleBond(selectedAtomId, atom.id);
-          } else {
+            setDraggingAtomId(null);
+          } else if (!isLocked) {
             setSelectedAtomId(atom.id);
+            setDraggingAtomId(atom.id);
             setBondMode(false);
           }
         }}
-        onMouseMove={(e) => {
-          if (!isLocked && e.buttons === 1) {
-            const rect = svgRef.current?.getBoundingClientRect();
-            if (rect) {
-              const newX = snapToGrid(e.clientX - rect.left);
-              const newY = snapToGrid(e.clientY - rect.top);
-              updateAtomPosition(atom.id, newX, newY);
-            }
-          }
-        }}
-        style={{ cursor: isLocked ? "default" : "move" }}
+        style={{ cursor: isLocked ? "default" : isDragging ? "grabbing" : "move" }}
       >
         {/* Bindungen werden separat gerendert, hier nur Atome */}
         <circle
@@ -412,7 +406,24 @@ export default function MoleculeBuilder({
             if (e.target === e.currentTarget) {
               setSelectedAtomId(null);
               setBondMode(false);
+              setDraggingAtomId(null);
             }
+          }}
+          onMouseMove={(e) => {
+            if (draggingAtomId) {
+              const rect = svgRef.current?.getBoundingClientRect();
+              if (rect) {
+                const atom = atoms.find((a) => a.id === draggingAtomId);
+                if (atom && !atom.locked) {
+                  const newX = snapToGrid(e.clientX - rect.left);
+                  const newY = snapToGrid(e.clientY - rect.top);
+                  updateAtomPosition(draggingAtomId, newX, newY);
+                }
+              }
+            }
+          }}
+          onMouseUp={() => {
+            setDraggingAtomId(null);
           }}
         >
           <defs>
