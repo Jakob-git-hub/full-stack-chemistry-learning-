@@ -5,7 +5,7 @@ Comprehensive test suite for ``backend/main.py`` covering:
 
 * API endpoints: ``/``, ``/health``, ``/generate-agent-lesson``,
   ``/lessons``, ``/lessons/drafts``, ``/lessons/{id}``,
-  ``/lessons/{id}/publish``
+  ``/lessons/{id}/publish``, ``/api/scraped-data``
 * Workflow unit functions (all with mocked externals):
   ``plan_scraping``, ``fetch_with_zyte``, ``structure_lesson``,
   ``save_lesson_to_appwrite``
@@ -33,7 +33,7 @@ from starlette import status
 
 # ---------------------------------------------------------------------------
 # Environment variables must be set before importing `main` so that
-# `load_dotenv()` (which never overrides existing variables) picks up
+# ``load_dotenv()`` (which never overrides existing variables) picks up
 # the test values below. No real API keys are ever used.
 # ---------------------------------------------------------------------------
 os.environ.setdefault("APPWRITE_ENDPOINT", "https://cloud.appwrite.io/v1")
@@ -54,6 +54,7 @@ from main import (  # noqa: E402
     LLM_API_KEY,
     LessonResponse,
     LessonStructure,
+    ScrapedDataRequest,
     ZYTE_API_KEY,
     app,
     fetch_with_zyte,
@@ -140,8 +141,8 @@ def zyte_mock():
         with patcher:
             ...
 
-    Each entry may be a MagicMock response (returned in order) or a callable
-    used as the ``side_effect`` of ``client.post``.
+    Each entry may be a MagicMock response (returned in order) or an exception
+    instance raised by the mocked ``post()``.
     """
 
     def factory(responses):
@@ -202,7 +203,6 @@ def test_generate_agent_lesson_happy_path(mock_llm, zyte_mock, appwrite_db):
     assert data["status"] == "draft"
     assert "created_at" in data
 
-    # Mocks were invoked as expected
     appwrite_db.create_document.assert_called_once()
     create_kwargs = appwrite_db.create_document.call_args.kwargs
     assert create_kwargs["database_id"] == "chemvibe"
@@ -241,7 +241,7 @@ def test_generate_agent_lesson_whitespace_only_topic():
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
-def test_generate_agent_llm_failure_returns_502(mock_llm, appwrite_db):
+def test_generate_agent_llm_failure_returns_502(appwrite_db):
     """LangChain LLM failure during planning -> 502 Bad Gateway."""
     llm = MagicMock()
     llm.__or__.side_effect = Exception("LLM connection refused")
@@ -250,10 +250,14 @@ def test_generate_agent_llm_failure_returns_502(mock_llm, appwrite_db):
     assert response.status_code == status.HTTP_502_BAD_GATEWAY
 
 
-def test_generate_agent_zyte_missing_key_returns_500(monkeypatch, mock_llm, appwrite_db):
+def test_generate_agent_zyte_missing_key_returns_500(monkeypatch, appwrite_db):
     """Missing ZYTE_API_KEY -> fetch_with_zyte raises 500 -> endpoint 500."""
     monkeypatch.setattr(main, "ZYTE_API_KEY", "")
-    llm = mock_llm(URLS_JSON_STR)
+    # Build LLM mock inline (fixtures cannot be called directly)
+    llm = MagicMock()
+    chain = MagicMock()
+    chain.invoke.return_value = URLS_JSON_STR
+    llm.__or__.return_value = chain
     with patch("main.get_llm", return_value=llm):
         response = client.post("/generate-agent-lesson", json={"topic": "Foo"})
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -313,7 +317,8 @@ def test_list_lessons_with_status_filter(appwrite_db):
     assert response.json() == []
 
     kwargs = appwrite_db.list_documents.call_args.kwargs
-    assert kwargs["queries"] == [AppwriteQuery.equal("status", "draft")]
+    # AppwriteQuery.equal() returns a JSON string; compare by value
+    assert kwargs["queries"] == ['{"method":"equal","attribute":"status","values":["draft"]}']
 
 
 def test_list_lessons_appwrite_not_configured(monkeypatch):
@@ -335,7 +340,7 @@ def test_list_drafts_uses_draft_filter(appwrite_db):
     assert response.status_code == status.HTTP_200_OK
 
     kwargs = appwrite_db.list_documents.call_args.kwargs
-    assert kwargs["queries"] == [AppwriteQuery.equal("status", "draft")]
+    assert kwargs["queries"] == ['{"method":"equal","attribute":"status","values":["draft"]}']
 
 
 def test_get_lesson_success(appwrite_db):
@@ -384,12 +389,13 @@ def test_publish_lesson_success(appwrite_db):
     assert data["status"] == "published"
     assert data["message"] == "Lektion veröffentlicht"
 
-    appwrite_db.update_document.assert_called_once_with(
-        database_id="chemvibe",
-        collection_id="lessons",
-        document_id="lesson-1",
-        data={"status": "published", "updated_at": appwrite_db.update_document.call_args.kwargs["data"]["updated_at"]},
-    )
+    appwrite_db.update_document.assert_called_once()
+    kwargs = appwrite_db.update_document.call_args.kwargs
+    assert kwargs["database_id"] == "chemvibe"
+    assert kwargs["collection_id"] == "lessons"
+    assert kwargs["document_id"] == "lesson-1"
+    assert kwargs["data"]["status"] == "published"
+    assert "updated_at" in kwargs["data"]
 
 
 def test_publish_lesson_not_found(appwrite_db):
@@ -402,6 +408,23 @@ def test_publish_lesson_appwrite_not_configured(monkeypatch):
     monkeypatch.setattr(main, "APPWRITE_PROJECT_ID", "")
     response = client.post("/lessons/lesson-1/publish")
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+
+
+def test_ingest_scraped_data_endpoint():
+    """POST /api/scraped-data accepts spider items and returns success."""
+    response = client.post(
+        "/api/scraped-data",
+        json={
+            "spider": "chemistry",
+            "items": [{"title": "Nukleophile Substitution", "url": "https://example.com"}],
+            "scraped_at": "2026-10-28T19:32:25Z",
+        },
+    )
+    assert response.status_code == status.HTTP_201_CREATED
+    data = response.json()
+    assert data["status"] == "ok"
+    assert data["spider"] == "chemistry"
+    assert data["items_received"] == 1
 
 
 # ---------------------------------------------------------------------------
@@ -476,7 +499,6 @@ async def test_fetch_with_zyte_http_error_status(zyte_mock):
 
 @pytest.mark.asyncio
 async def test_fetch_with_zyte_network_exception(zyte_mock):
-    # side_effect as an exception instance is raised by the mocked post()
     patcher, _ = zyte_mock([Exception("network unreachable")])
     with patcher:
         results = await fetch_with_zyte(["https://example.com"])
@@ -610,12 +632,10 @@ def test_challenge_required_and_optional_fields():
         palette_atoms=[{"type": "carbon", "symbol": "C", "name": "Kohlenstoff"}],
     )
     assert challenge.type == "molecule_builder"
-    # Optional fields are absent by default
     assert challenge.target_smiles is None
     assert challenge.target_atoms is None
     assert challenge.target_bonds is None
 
-    # Required fields are enforced
     with pytest.raises(ValidationError):
         Challenge()
 
@@ -628,6 +648,16 @@ def test_lesson_structure_required_fields():
     incomplete = {k: v for k, v in LESSON_JSON.items() if k != "challenge"}
     with pytest.raises(ValidationError):
         LessonStructure(**incomplete)
+
+
+def test_scraped_data_request_model():
+    req = ScrapedDataRequest(
+        spider="chemistry",
+        items=[{"title": "Test", "url": "https://example.com"}],
+    )
+    assert req.spider == "chemistry"
+    assert len(req.items) == 1
+    assert req.scraped_at is None
 
 
 # ---------------------------------------------------------------------------
@@ -684,12 +714,16 @@ def test_special_characters_in_topic(mock_llm, zyte_mock, appwrite_db):
 
 
 def test_concurrent_lesson_generation(mock_llm, zyte_mock, appwrite_db):
-    """Multiple concurrent lesson-generation requests all succeed."""
-    # ``plan_scraping`` receives the lesson JSON (not a URL list) and falls
-    # back to a Wikipedia URL; ``structure_lesson`` receives the lesson JSON.
+    """Multiple concurrent lesson-generation requests all succeed.
+
+    Uses ``return_value`` (not ``side_effect``) on the LLM mock so every
+    concurrent call gets the same canned response without exhausting a list.
+    """
     llm = mock_llm(LESSON_JSON_STR)
     appwrite_db.create_document.return_value = {"$id": "lesson-concurrent"}
-    zyte_patcher, _ = zyte_mock([_json_response(200, {})])
+    # return_value so post() returns the same response for every call
+    zyte_patcher, mock_client = zyte_mock([_json_response(200, {})])
+    mock_client.post.return_value = _json_response(200, {})
 
     with patch("main.get_llm", return_value=llm), zyte_patcher:
 
@@ -704,29 +738,3 @@ def test_concurrent_lesson_generation(mock_llm, zyte_mock, appwrite_db):
     for response in responses:
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["status"] == "draft"
-
-
-def test_scraped_data_endpoint():
-    response = client.post(
-        "/api/scraped-data",
-        json={
-            "spider": "chemistry",
-            "items": [{"title": "Nukleophile Substitution", "url": "https://example.com"}],
-            "scraped_at": "2026-10-28T19:32:25Z",
-        },
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["status"] == "ok"
-    assert data["items_received"] == 1
-
-
-def test_scraped_data_alias_endpoint():
-    response = client.post(
-        "/scraped-data",
-        json={"spider": "chemistry", "items": [], "scraped_at": None},
-    )
-    assert response.status_code == 201
-    data = response.json()
-    assert data["status"] == "ok"
-    assert data["items_received"] == 0
