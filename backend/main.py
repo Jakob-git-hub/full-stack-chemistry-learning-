@@ -374,7 +374,7 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
         "title": lesson.title,
         "category": lesson.category,
         "theory": lesson.theory,
-        "challenge": lesson.challenge.model_dump(),
+        "challenge": json.dumps(lesson.challenge.model_dump()),
         "status": "draft",
         "topic": topic,
     }
