@@ -5,7 +5,7 @@ import { useUserProfile } from "../context/UserProfileContext";
 // Lektionsverlauf: abgeschlossene Lektionen mit Datum, Score, XP
 // ---------------------------------------------------------------------------
 export default function LessonHistory({ allLessons = [], onRetry }) {
-  const { profile, getLessonResult } = useUserProfile();
+  const { profile } = useUserProfile();
   const [filterCategory, setFilterCategory] = useState("all");
 
   const categories = [

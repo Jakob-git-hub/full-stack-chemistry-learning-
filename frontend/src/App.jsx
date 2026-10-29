@@ -8,10 +8,7 @@ import Profile from "./components/Profile";
 import AdminDashboard from "./components/AdminDashboard";
 import AuthForm from "./components/AuthForm";
 import UserMenu from "./components/UserMenu";
-import {
-  fetchPublishedLessons,
-  APPWRITE_CONFIG,
-} from "./services/appwrite";
+import { fetchPublishedLessons } from "./services/appwrite";
 
 // ---------------------------------------------------------------------------
 // Demo-Daten als Fallback (falls Appwrite nicht konfiguriert ist)
@@ -104,7 +101,7 @@ const DEMO_LESSONS = [
 // Inner App Component (mit Auth)
 // ---------------------------------------------------------------------------
 function InnerApp() {
-  const { user, loading: authLoading, login, register, logout } = useAuth();
+  const { user, loading: authLoading } = useAuth();
 
   // Loading state for auth
   if (authLoading) {
@@ -126,7 +123,7 @@ function InnerApp() {
 }
 
 function InnerAppContent() {
-  const { user, login, register, logout } = useAuth();
+  const { user } = useAuth();
   const {
     profile,
     loading: profileLoading,

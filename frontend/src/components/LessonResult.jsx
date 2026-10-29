@@ -110,7 +110,7 @@ export default function LessonResult({
   onReviewMistakes,
   onBackToSkillTree,
 }) {
-  const { profile, addXp, incrementStreak, loseHeart } = useUserProfile();
+  const { profile, addXp, incrementStreak } = useUserProfile();
   const [xpAwarded, setXpAwarded] = useState(false);
   const [showConfetti, setShowConfetti] = useState(true);
   const [leveledUp, setLeveledUp] = useState(false);
