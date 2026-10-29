@@ -140,20 +140,17 @@ def get_databases() -> Databases:
 
 
 # ---------------------------------------------------------------------------
-# Helper: run synchronous LLM call with a timeout in a worker thread
+# Helper: run async LLM call with a timeout
 # ---------------------------------------------------------------------------
 LLM_TIMEOUT_SECONDS = 45
 
 
 async def run_llm_with_timeout(chain, messages) -> str:
-    """Führt einen synchronen LangChain-LLM-Aufruf mit Timeout in einem Thread aus."""
-
-    def _invoke():
-        return chain.invoke(messages)
+    """Führt einen asynchronen LangChain-LLM-Aufruf mit Timeout aus."""
 
     try:
         return await asyncio.wait_for(
-            asyncio.to_thread(_invoke), timeout=LLM_TIMEOUT_SECONDS
+            chain.ainvoke(messages), timeout=LLM_TIMEOUT_SECONDS
         )
     except asyncio.TimeoutError:
         raise HTTPException(
