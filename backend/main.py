@@ -13,15 +13,19 @@ Alle API-Schlüssel und Konfigurationen über os.getenv().
 """
 
 import asyncio
+import ipaddress
 import json
+import logging
 import os
 import re
+import socket
+import time
+from collections.abc import Callable
 from datetime import datetime, timezone
 from typing import Any, Optional
 
-from pydantic import ValidationError
-
 from dotenv import load_dotenv
+from pydantic import ValidationError
 
 load_dotenv()
 
@@ -30,14 +34,17 @@ from appwrite.client import Client
 from appwrite.id import ID
 from appwrite.query import Query as AppwriteQuery
 from appwrite.services.databases import Databases
-from fastapi import FastAPI, HTTPException, status
+from fastapi import Depends, FastAPI, Header, HTTPException, Request, status
 from fastapi.middleware.cors import CORSMiddleware
+from fastapi.responses import JSONResponse
 from langchain_core.messages import HumanMessage, SystemMessage
 from langchain_core.output_parsers import StrOutputParser
 
 # LangChain imports
 from langchain_openai import ChatOpenAI
 from pydantic import BaseModel, Field
+
+logger = logging.getLogger("chemvibe.security")
 
 # ---------------------------------------------------------------------------
 # Environment configuration
@@ -59,6 +66,165 @@ ALLOWED_ORIGINS_RAW = os.getenv("ALLOWED_ORIGINS", "")
 ALLOWED_ORIGINS = [o.strip() for o in ALLOWED_ORIGINS_RAW.split(",") if o.strip()] if ALLOWED_ORIGINS_RAW else []
 
 # ---------------------------------------------------------------------------
+# Authentication / authorization configuration
+# ---------------------------------------------------------------------------
+# Mutating endpoints (lesson generation, publish, draft listing) require this key.
+ADMIN_API_KEY = os.getenv("ADMIN_API_KEY", "")
+# The Zyte spider ingestion endpoint requires this key.
+SPIDER_API_KEY = os.getenv("SPIDER_API_KEY", "")
+
+# ---------------------------------------------------------------------------
+# Rate limiting configuration (simple in-memory sliding window)
+# ---------------------------------------------------------------------------
+RATE_LIMIT_REQUESTS = int(os.getenv("RATE_LIMIT_REQUESTS", "60"))  # requests per window
+RATE_LIMIT_WINDOW_SECONDS = int(os.getenv("RATE_LIMIT_WINDOW_SECONDS", "60"))
+_rate_limit_state: dict[str, list[float]] = {}
+
+
+def _client_ip(request: Request) -> str:
+    """Best-effort client IP for rate limiting (respects a single proxy hop)."""
+    forwarded = request.headers.get("x-forwarded-for")
+    if forwarded:
+        return forwarded.split(",")[0].strip()
+    return request.client.host if request.client else "unknown"
+
+
+def rate_limit_exceeded(request: Request) -> bool:
+    """Return True if the client has exceeded the rate limit, recording the hit."""
+    now = time.time()
+    window_start = now - RATE_LIMIT_WINDOW_SECONDS
+    ip = _client_ip(request)
+    hits = [t for t in _rate_limit_state.get(ip, []) if t > window_start]
+    if len(hits) >= RATE_LIMIT_REQUESTS:
+        _rate_limit_state[ip] = hits
+        return True
+    hits.append(now)
+    _rate_limit_state[ip] = hits
+    return False
+
+
+# ---------------------------------------------------------------------------
+# Authentication dependencies
+# ---------------------------------------------------------------------------
+async def require_admin_api_key(x_admin_api_key: Optional[str] = Header(None)) -> None:
+    """Protect admin-facing mutating endpoints with ADMIN_API_KEY.
+
+    When ADMIN_API_KEY is not configured (local dev / demo), the endpoint stays
+    open but a warning is logged so the misconfiguration is visible.
+    """
+    if not ADMIN_API_KEY:
+        logger.warning(
+            "ADMIN_API_KEY is not configured; admin endpoint accessed without auth"
+        )
+        return
+    if not x_admin_api_key or not _constant_time_compare(x_admin_api_key, ADMIN_API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Admin API key required",
+        )
+
+
+async def require_spider_api_key(x_spider_api_key: Optional[str] = Header(None)) -> None:
+    """Protect the scraped-data ingestion endpoint with SPIDER_API_KEY."""
+    if not SPIDER_API_KEY:
+        logger.warning(
+            "SPIDER_API_KEY is not configured; ingestion endpoint accessed without auth"
+        )
+        return
+    if not x_spider_api_key or not _constant_time_compare(x_spider_api_key, SPIDER_API_KEY):
+        raise HTTPException(
+            status_code=status.HTTP_401_UNAUTHORIZED,
+            detail="Spider API key required",
+        )
+
+
+def _constant_time_compare(a: str, b: str) -> bool:
+    """Constant-time string comparison to avoid timing leaks."""
+    if len(a) != len(b):
+        return False
+    result = 0
+    for x, y in zip(a, b):
+        result |= ord(x) ^ ord(y)
+    return result == 0
+
+
+def _api_error(
+    status_code: int, message: str, exc: Optional[Exception] = None
+) -> HTTPException:
+    """Return a generic HTTPException while logging the real error server-side.
+
+    Never embed raw exception text in the client-facing detail to avoid leaking
+    internals (stack traces, Appwrite/LLM/Zyte errors, environment info).
+    """
+    if exc is not None:
+        logger.exception("%s: %s", message, exc)
+    else:
+        logger.error(message)
+    return HTTPException(status_code=status_code, detail=message)
+
+
+# ---------------------------------------------------------------------------
+# SSRF protection: URL allowlist validation
+# ---------------------------------------------------------------------------
+_PRIVATE_NETWORKS = [
+    ipaddress.ip_network("0.0.0.0/8"),
+    ipaddress.ip_network("10.0.0.0/8"),
+    ipaddress.ip_network("100.64.0.0/10"),
+    ipaddress.ip_network("127.0.0.0/8"),
+    ipaddress.ip_network("169.254.0.0/16"),
+    ipaddress.ip_network("172.16.0.0/12"),
+    ipaddress.ip_network("192.0.0.0/24"),
+    ipaddress.ip_network("192.0.2.0/24"),
+    ipaddress.ip_network("192.168.0.0/16"),
+    ipaddress.ip_network("198.51.100.0/24"),
+    ipaddress.ip_network("203.0.113.0/24"),
+    ipaddress.ip_network("224.0.0.0/4"),
+    ipaddress.ip_network("240.0.0.0/4"),
+    ipaddress.ip_network("::1/128"),
+    ipaddress.ip_network("fc00::/7"),
+    ipaddress.ip_network("fe80::/10"),
+    ipaddress.ip_network("ff00::/8"),
+]
+
+
+def is_allowed_url(url: str) -> bool:
+    """Return True only for http/https URLs that resolve to public IP addresses.
+
+    Blocks private/reserved ranges (RFC 1918, loopback, link-local, metadata,
+    multicast, documentation ranges) to mitigate SSRF when URLs are chosen by
+    the LLM or supplied by external callers.
+    """
+    try:
+        parsed = httpx.URL(url)
+    except Exception:
+        return False
+    if parsed.scheme not in ("http", "https"):
+        return False
+    host = parsed.host
+    if not host:
+        return False
+    try:
+        addr = ipaddress.ip_address(host)
+    except ValueError:
+        # Hostname: resolve via the system resolver and check each result.
+        # If the hostname cannot be resolved at all, allow it (the LLM may
+        # return valid public hostnames; Zyte will fail on unreachable ones).
+        try:
+            infos = socket.getaddrinfo(host, None)
+        except Exception:
+            return True
+        for info in infos:
+            try:
+                addr = ipaddress.ip_address(info[4][0])
+            except (ValueError, IndexError):
+                continue
+            if any(addr in net for net in _PRIVATE_NETWORKS):
+                return False
+        return True
+    return not any(addr in net for net in _PRIVATE_NETWORKS)
+
+
+# ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
 app = FastAPI(
@@ -74,6 +240,18 @@ app.add_middleware(
     allow_methods=["*"],
     allow_headers=["*"],
 )
+
+
+@app.middleware("http")
+async def rate_limit_middleware(request: Request, call_next: Callable) -> JSONResponse:
+    """Simple per-IP sliding-window rate limiter applied to all requests."""
+    if rate_limit_exceeded(request):
+        return JSONResponse(
+            status_code=status.HTTP_429_TOO_MANY_REQUESTS,
+            content={"detail": "Rate limit exceeded. Please try again later."},
+            headers={"Retry-After": str(RATE_LIMIT_WINDOW_SECONDS)},
+        )
+    return await call_next(request)
 
 # ---------------------------------------------------------------------------
 # LangChain LLM instance
@@ -161,10 +339,7 @@ async def run_llm_with_timeout(chain, messages) -> str:
             detail="LLM-Aufruf hat das Timeout überschritten",
         )
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LangChain LLM-Fehler: {exc!s}",
-        )
+        raise _api_error(status.HTTP_502_BAD_GATEWAY, "LangChain LLM-Fehler", exc)
 
 
 # ---------------------------------------------------------------------------
@@ -232,6 +407,16 @@ async def fetch_with_zyte(urls: list[str]) -> list[dict[str, Any]]:
 
     async with httpx.AsyncClient(timeout=60.0) as client:
         for url in urls:
+            if not is_allowed_url(url):
+                logger.warning("SSRF: blocked disallowed URL %s", url)
+                results.append(
+                    {
+                        "url": url,
+                        "status": "error",
+                        "error": "URL nicht erlaubt (private oder reservierte Adresse)",
+                    }
+                )
+                continue
             try:
                 response = await client.post(
                     ZYTE_API_URL,
@@ -354,9 +539,10 @@ Gesammelte Rohdaten:
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_502_BAD_GATEWAY,
-            detail=f"LangChain LLM-Fehler bei der Strukturierung: {exc!s}",
+        raise _api_error(
+            status.HTTP_502_BAD_GATEWAY,
+            "LangChain LLM-Fehler bei der Strukturierung",
+            exc,
         )
 
     # JSON aus der LLM-Antwort extrahieren
@@ -381,9 +567,10 @@ Gesammelte Rohdaten:
     try:
         return LessonStructure(**lesson_data)
     except ValidationError as exc:
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"LLM-Antwort entspricht nicht dem erwarteten Schema: {exc!s}",
+        raise _api_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "LLM-Antwort entspricht nicht dem erwarteten Schema",
+            exc,
         )
 
 
@@ -421,9 +608,8 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
         )
         return result["$id"]
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Appwrite-Fehler beim Speichern: {exc!s}",
+        raise _api_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR, "Appwrite-Fehler beim Speichern", exc
         )
 
 
@@ -447,7 +633,9 @@ async def root():
 
 
 @app.post("/generate-agent-lesson", response_model=LessonResponse, status_code=status.HTTP_201_CREATED)
-async def generate_agent_lesson(request: GenerateLessonRequest):
+async def generate_agent_lesson(
+    request: GenerateLessonRequest, _: None = Depends(require_admin_api_key)
+):
     """
     Agentenbasierter Lektions-Generator mit LangChain.
 
@@ -487,14 +675,17 @@ async def generate_agent_lesson(request: GenerateLessonRequest):
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Unerwarteter Fehler bei der Lektions-Generierung: {exc!s}",
+        raise _api_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Unerwarteter Fehler bei der Lektions-Generierung",
+            exc,
         )
 
 
 @app.get("/lessons", response_model=list[LessonResponse])
-async def list_lessons(status_filter: Optional[str] = None):
+async def list_lessons(
+    status_filter: Optional[str] = None, _: None = Depends(require_admin_api_key)
+):
     """Listet alle Lektionen auf, optional gefiltert nach Status."""
     if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
         raise HTTPException(
@@ -527,14 +718,11 @@ async def list_lessons(status_filter: Optional[str] = None):
             )
         return lessons
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Appwrite-Fehler: {exc!s}",
-        )
+        raise _api_error(status.HTTP_500_INTERNAL_SERVER_ERROR, "Appwrite-Fehler", exc)
 
 
 @app.get("/lessons/drafts", response_model=list[LessonResponse])
-async def list_drafts():
+async def list_drafts(_: None = Depends(require_admin_api_key)):
     """Listet alle Lektionen mit Status 'draft' (für das Admin-Dashboard)."""
     return await list_lessons(status_filter="draft")
 
@@ -558,14 +746,15 @@ async def get_lesson(lesson_id: str):
         )
         return doc
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Lektion nicht gefunden: {exc!s}",
+        raise _api_error(
+            status.HTTP_404_NOT_FOUND, "Lektion nicht gefunden", exc
         )
 
 
 @app.post("/lessons/{lesson_id}/publish")
-async def publish_lesson(lesson_id: str):
+async def publish_lesson(
+    lesson_id: str, _: None = Depends(require_admin_api_key)
+):
     """Setzt eine Lektion von 'draft' auf 'published' (öffentlich im Lernpfad)."""
     if not APPWRITE_PROJECT_ID or not APPWRITE_API_KEY:
         raise HTTPException(
@@ -590,9 +779,10 @@ async def publish_lesson(lesson_id: str):
             "message": "Lektion veröffentlicht",
         }
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail=f"Lektion nicht gefunden oder konnte nicht veröffentlicht werden: {exc!s}",
+        raise _api_error(
+            status.HTTP_404_NOT_FOUND,
+            "Lektion nicht gefunden oder konnte nicht veröffentlicht werden",
+            exc,
         )
 
 
@@ -612,7 +802,9 @@ class ScrapedDataRequest(BaseModel):
 
 @app.post("/api/scraped-data", status_code=status.HTTP_201_CREATED)
 @app.post("/scraped-data", status_code=status.HTTP_201_CREATED)
-async def ingest_scraped_data(request: ScrapedDataRequest):
+async def ingest_scraped_data(
+    request: ScrapedDataRequest, _: None = Depends(require_spider_api_key)
+):
     """Receives scraped items from the Zyte spider, structures them into a lesson
     via LangChain, and saves the lesson as a draft in Appwrite."""
     import logging
@@ -683,7 +875,8 @@ async def ingest_scraped_data(request: ScrapedDataRequest):
     except HTTPException:
         raise
     except Exception as exc:  # noqa: BLE001
-        raise HTTPException(
-            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Fehler bei der Verarbeitung der gescrapten Daten: {exc!s}",
+        raise _api_error(
+            status.HTTP_500_INTERNAL_SERVER_ERROR,
+            "Fehler bei der Verarbeitung der gescrapten Daten",
+            exc,
         )
