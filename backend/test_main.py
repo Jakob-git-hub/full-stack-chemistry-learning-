@@ -18,6 +18,7 @@ All external calls (LangChain LLM, Zyte via httpx, Appwrite SDK) are
 mocked — no real network requests are made.
 """
 
+import asyncio
 import json
 import os
 from concurrent.futures import ThreadPoolExecutor
@@ -44,6 +45,12 @@ os.environ.setdefault("APPWRITE_COLLECTION_ID", "lessons")
 os.environ.setdefault("ZYTE_API_KEY", "test-zyte-key")
 os.environ.setdefault("LLM_API_KEY", "test-llm-key")
 os.environ.setdefault("LLM_MODEL", "gpt-4o-mini")
+os.environ.setdefault("ADMIN_API_KEY", "test-admin-key")
+os.environ.setdefault("SPIDER_API_KEY", "test-spider-key")
+
+# Headers for protected endpoints (ADMIN_API_KEY / SPIDER_API_KEY are set above).
+ADMIN_HEADERS = {"X-Admin-API-Key": "test-admin-key"}
+SPIDER_HEADERS = {"X-Spider-API-Key": "test-spider-key"}
 
 import main  # noqa: E402
 from main import (  # noqa: E402
@@ -193,6 +200,7 @@ def test_generate_agent_lesson_happy_path(mock_llm, zyte_mock, appwrite_db):
         response = client.post(
             "/generate-agent-lesson",
             json={"topic": "Nukleophile Substitution", "difficulty": "medium"},
+            headers=ADMIN_HEADERS,
         )
 
     assert response.status_code == status.HTTP_201_CREATED
@@ -218,7 +226,11 @@ def test_generate_agent_lesson_difficulty_default(mock_llm, zyte_mock, appwrite_
     zyte_patcher, _ = zyte_mock([_json_response(200, {})])
 
     with patch("main.get_llm", return_value=llm), zyte_patcher:
-        response = client.post("/generate-agent-lesson", json={"topic": "Säure-Base-Reaktion"})
+        response = client.post(
+            "/generate-agent-lesson",
+            json={"topic": "Säure-Base-Reaktion"},
+            headers=ADMIN_HEADERS,
+        )
 
     assert response.status_code == status.HTTP_201_CREATED
     assert response.json()["status"] == "draft"
@@ -226,18 +238,24 @@ def test_generate_agent_lesson_difficulty_default(mock_llm, zyte_mock, appwrite_
 
 def test_generate_agent_lesson_missing_topic_field():
     """Topic is required -> 422 validation error."""
-    response = client.post("/generate-agent-lesson", json={})
+    response = client.post(
+        "/generate-agent-lesson", json={}, headers=ADMIN_HEADERS
+    )
     assert response.status_code == status.HTTP_422_UNPROCESSABLE_ENTITY
 
 
 def test_generate_agent_lesson_empty_topic():
-    response = client.post("/generate-agent-lesson", json={"topic": ""})
+    response = client.post(
+        "/generate-agent-lesson", json={"topic": ""}, headers=ADMIN_HEADERS
+    )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 def test_generate_agent_lesson_whitespace_only_topic():
     """Whitespace-only topic is rejected after ``.strip()``."""
-    response = client.post("/generate-agent-lesson", json={"topic": "   \t  "})
+    response = client.post(
+        "/generate-agent-lesson", json={"topic": "   \t  "}, headers=ADMIN_HEADERS
+    )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
@@ -246,7 +264,9 @@ def test_generate_agent_llm_failure_returns_502(appwrite_db):
     llm = MagicMock()
     llm.__or__.side_effect = Exception("LLM connection refused")
     with patch("main.get_llm", return_value=llm):
-        response = client.post("/generate-agent-lesson", json={"topic": "Foo"})
+        response = client.post(
+            "/generate-agent-lesson", json={"topic": "Foo"}, headers=ADMIN_HEADERS
+        )
     assert response.status_code == status.HTTP_502_BAD_GATEWAY
 
 
@@ -259,7 +279,9 @@ def test_generate_agent_zyte_missing_key_returns_500(monkeypatch, appwrite_db):
     chain.invoke.return_value = URLS_JSON_STR
     llm.__or__.return_value = chain
     with patch("main.get_llm", return_value=llm):
-        response = client.post("/generate-agent-lesson", json={"topic": "Foo"})
+        response = client.post(
+            "/generate-agent-lesson", json={"topic": "Foo"}, headers=ADMIN_HEADERS
+        )
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
@@ -270,7 +292,9 @@ def test_generate_agent_appwrite_failure_returns_500(mock_llm, zyte_mock, appwri
     zyte_patcher, _ = zyte_mock([_json_response(200, {})])
 
     with patch("main.get_llm", return_value=llm), zyte_patcher:
-        response = client.post("/generate-agent-lesson", json={"topic": "Foo"})
+        response = client.post(
+            "/generate-agent-lesson", json={"topic": "Foo"}, headers=ADMIN_HEADERS
+        )
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
@@ -294,7 +318,7 @@ def test_list_lessons_success(appwrite_db):
         ]
     }
 
-    response = client.get("/lessons")
+    response = client.get("/lessons", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert len(data) == 2
@@ -312,7 +336,7 @@ def test_list_lessons_success(appwrite_db):
 def test_list_lessons_with_status_filter(appwrite_db):
     appwrite_db.list_documents.return_value = {"documents": []}
 
-    response = client.get("/lessons?status_filter=draft")
+    response = client.get("/lessons?status_filter=draft", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_200_OK
     assert response.json() == []
 
@@ -323,20 +347,20 @@ def test_list_lessons_with_status_filter(appwrite_db):
 
 def test_list_lessons_appwrite_not_configured(monkeypatch):
     monkeypatch.setattr(main, "APPWRITE_PROJECT_ID", "")
-    response = client.get("/lessons")
+    response = client.get("/lessons", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
 def test_list_lessons_appwrite_error(appwrite_db):
     appwrite_db.list_documents.side_effect = Exception("Appwrite is down")
-    response = client.get("/lessons")
+    response = client.get("/lessons", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
 def test_list_drafts_uses_draft_filter(appwrite_db):
     appwrite_db.list_documents.return_value = {"documents": []}
 
-    response = client.get("/lessons/drafts")
+    response = client.get("/lessons/drafts", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_200_OK
 
     kwargs = appwrite_db.list_documents.call_args.kwargs
@@ -382,7 +406,7 @@ def test_get_lesson_appwrite_not_configured(monkeypatch):
 def test_publish_lesson_success(appwrite_db):
     appwrite_db.update_document.return_value = {"$id": "lesson-1", "status": "published"}
 
-    response = client.post("/lessons/lesson-1/publish")
+    response = client.post("/lessons/lesson-1/publish", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_200_OK
     data = response.json()
     assert data["id"] == "lesson-1"
@@ -400,13 +424,15 @@ def test_publish_lesson_success(appwrite_db):
 
 def test_publish_lesson_not_found(appwrite_db):
     appwrite_db.update_document.side_effect = Exception("not found")
-    response = client.post("/lessons/does-not-exist/publish")
+    response = client.post(
+        "/lessons/does-not-exist/publish", headers=ADMIN_HEADERS
+    )
     assert response.status_code == status.HTTP_404_NOT_FOUND
 
 
 def test_publish_lesson_appwrite_not_configured(monkeypatch):
     monkeypatch.setattr(main, "APPWRITE_PROJECT_ID", "")
-    response = client.post("/lessons/lesson-1/publish")
+    response = client.post("/lessons/lesson-1/publish", headers=ADMIN_HEADERS)
     assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
@@ -447,6 +473,7 @@ def test_ingest_scraped_data_endpoint():
                 ],
                 "scraped_at": "2026-10-28T19:32:25Z",
             },
+            headers=SPIDER_HEADERS,
         )
 
     assert response.status_code == status.HTTP_201_CREATED
@@ -465,6 +492,7 @@ def test_ingest_scraped_data_endpoint_empty_items():
     response = client.post(
         "/api/scraped-data",
         json={"spider": "chemistry", "items": []},
+        headers=SPIDER_HEADERS,
     )
     assert response.status_code == status.HTTP_400_BAD_REQUEST
 
@@ -722,9 +750,9 @@ async def test_missing_zyte_api_key_fetch_with_zyte_raises_500(monkeypatch):
 
 def test_missing_appwrite_credentials_endpoints_raise_500(monkeypatch):
     monkeypatch.setattr(main, "APPWRITE_PROJECT_ID", "")
-    assert client.get("/lessons").status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert client.get("/lessons/1").status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
-    assert client.post("/lessons/1/publish").status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert client.get("/lessons", headers=ADMIN_HEADERS).status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert client.get("/lessons/1", headers=ADMIN_HEADERS).status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    assert client.post("/lessons/1/publish", headers=ADMIN_HEADERS).status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
 
 
 # ---------------------------------------------------------------------------
@@ -737,7 +765,11 @@ def test_very_long_topic(mock_llm, zyte_mock, appwrite_db):
     zyte_patcher, _ = zyte_mock([_json_response(200, {})])
 
     with patch("main.get_llm", return_value=llm), zyte_patcher:
-        response = client.post("/generate-agent-lesson", json={"topic": "A" * 5000})
+        response = client.post(
+            "/generate-agent-lesson",
+            json={"topic": "A" * 5000},
+            headers=ADMIN_HEADERS,
+        )
 
     assert response.status_code == status.HTTP_201_CREATED
 
@@ -750,7 +782,11 @@ def test_special_characters_in_topic(mock_llm, zyte_mock, appwrite_db):
 
     topic = "C++ (Organische Chemie) & Co.: ÄÖÜ ß €"
     with patch("main.get_llm", return_value=llm), zyte_patcher:
-        response = client.post("/generate-agent-lesson", json={"topic": topic})
+        response = client.post(
+            "/generate-agent-lesson",
+            json={"topic": topic},
+            headers=ADMIN_HEADERS,
+        )
 
     assert response.status_code == status.HTTP_201_CREATED
 
@@ -771,7 +807,9 @@ def test_concurrent_lesson_generation(mock_llm, zyte_mock, appwrite_db):
 
         def call(index):
             return client.post(
-                "/generate-agent-lesson", json={"topic": f"Topic {index}"}
+                "/generate-agent-lesson",
+                json={"topic": f"Topic {index}"},
+                headers=ADMIN_HEADERS,
             )
 
         with ThreadPoolExecutor(max_workers=5) as pool:
@@ -780,3 +818,128 @@ def test_concurrent_lesson_generation(mock_llm, zyte_mock, appwrite_db):
     for response in responses:
         assert response.status_code == status.HTTP_201_CREATED
         assert response.json()["status"] == "draft"
+
+
+# ---------------------------------------------------------------------------
+# Security tests
+# ---------------------------------------------------------------------------
+
+
+def test_generate_lesson_requires_admin_api_key():
+    """POST /generate-agent-lesson returns 401 when ADMIN_API_KEY header missing."""
+    response = client.post(
+        "/generate-agent-lesson", json={"topic": "Foo"}
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_generate_lesson_rejects_wrong_admin_api_key():
+    """POST /generate-agent-lesson returns 401 when ADMIN_API_KEY header is wrong."""
+    response = client.post(
+        "/generate-agent-lesson",
+        json={"topic": "Foo"},
+        headers={"X-Admin-API-Key": "wrong-key"},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_list_lessons_requires_admin_api_key():
+    """GET /lessons returns 401 when ADMIN_API_KEY header missing."""
+    response = client.get("/lessons")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_list_drafts_requires_admin_api_key():
+    """GET /lessons/drafts returns 401 when ADMIN_API_KEY header missing."""
+    response = client.get("/lessons/drafts")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_publish_requires_admin_api_key():
+    """POST /lessons/{id}/publish returns 401 when ADMIN_API_KEY header missing."""
+    response = client.post("/lessons/lesson-1/publish")
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_scraped_data_requires_spider_api_key():
+    """POST /api/scraped-data returns 401 when SPIDER_API_KEY header missing."""
+    response = client.post(
+        "/api/scraped-data",
+        json={"spider": "chemistry", "items": []},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_scraped_data_rejects_wrong_spider_api_key():
+    """POST /api/scraped-data returns 401 when SPIDER_API_KEY header is wrong."""
+    response = client.post(
+        "/api/scraped-data",
+        json={"spider": "chemistry", "items": []},
+        headers={"X-Spider-API-Key": "wrong-key"},
+    )
+    assert response.status_code == status.HTTP_401_UNAUTHORIZED
+
+
+def test_ssrf_blocks_private_ip_url(zyte_mock):
+    """fetch_with_zyte returns an error for private/RFC1918 URLs without calling Zyte."""
+    zyte_patcher, mock_client = zyte_mock([_json_response(200, {})])
+    mock_client.post.return_value = _json_response(200, {})
+    with zyte_patcher:
+        results = asyncio.run(
+            fetch_with_zyte(
+                [
+                    "http://169.254.169.254/latest/meta-data/",
+                    "https://en.wikipedia.org/wiki/Test",
+                ]
+            )
+        )
+    private = [r for r in results if "169.254" in r["url"]][0]
+    public = [r for r in results if "wikipedia" in r["url"]][0]
+    assert private["status"] == "error"
+    assert "nicht erlaubt" in private["error"]
+    assert public["status"] == "success"
+    # Zyte must not be called for the blocked private URL.
+    assert mock_client.post.call_count == 1
+
+
+def test_rate_limiting_allows_then_blocks(monkeypatch):
+    """Rate limiter allows requests up to the limit then returns 429."""
+    import main as main_module
+
+    monkeypatch.setattr(main_module, "RATE_LIMIT_REQUESTS", 2)
+    monkeypatch.setattr(main_module, "RATE_LIMIT_WINDOW_SECONDS", 60)
+    main_module._rate_limit_state = {}
+    try:
+        r1 = client.get("/health")
+        r2 = client.get("/health")
+        r3 = client.get("/health")
+        assert r1.status_code == status.HTTP_200_OK
+        assert r2.status_code == status.HTTP_200_OK
+        assert r3.status_code == status.HTTP_429_TOO_MANY_REQUESTS
+    finally:
+        main_module._rate_limit_state = {}
+
+
+def test_error_responses_do_not_leak_stack_traces(mock_llm, zyte_mock, appwrite_db):
+    """Error responses return a generic message, not raw exception text."""
+    llm = mock_llm([URLS_JSON_STR, LESSON_JSON_STR])
+    # make the async ``ainvoke`` awaitable so the LLM flow proceeds
+    llm.__or__.return_value.ainvoke = AsyncMock(
+        side_effect=[URLS_JSON_STR, LESSON_JSON_STR]
+    )
+    appwrite_db.create_document.side_effect = RuntimeError("boom: secret internal detail")
+    zyte_patcher, mock_client = zyte_mock([_json_response(200, {})])
+    mock_client.post.return_value = _json_response(200, {})
+
+    with patch("main.get_llm", return_value=llm), zyte_patcher:
+        response = client.post(
+            "/generate-agent-lesson",
+            json={"topic": "Foo"},
+            headers=ADMIN_HEADERS,
+        )
+
+    assert response.status_code == status.HTTP_500_INTERNAL_SERVER_ERROR
+    body = response.json()
+    assert "detail" in body
+    assert "boom" not in body["detail"]
+    assert "secret internal detail" not in body["detail"]
