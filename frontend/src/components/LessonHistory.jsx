@@ -2,7 +2,7 @@ import { useState } from "react";
 import { useUserProfile } from "../context/UserProfileContext";
 
 // ---------------------------------------------------------------------------
-// Lektionsverlauf: abgeschlossene Lektionen mit Datum, Score, XP
+// Lektionsverlauf: abgeschlossene Lektionen mit Datum, Score, XP, Zeit
 // ---------------------------------------------------------------------------
 export default function LessonHistory({ allLessons = [], onRetry }) {
   const { profile } = useUserProfile();
@@ -26,6 +26,22 @@ export default function LessonHistory({ allLessons = [], onRetry }) {
       ? completed
       : completed.filter((entry) => entry.lesson.category === filterCategory);
 
+  const totalXp = completed.reduce(
+    (sum, e) => sum + (e.xpEarned || 0),
+    0
+  );
+  const avgScore =
+    completed.length > 0
+      ? Math.round(
+          completed.reduce((sum, e) => sum + (e.score || 0), 0) /
+            completed.length
+        )
+      : 0;
+  const totalTimeSeconds = completed.reduce(
+    (sum, e) => sum + (e.timeSpentSeconds || 0),
+    0
+  );
+
   const formatDate = (iso) => {
     if (!iso) return "—";
     return new Date(iso).toLocaleDateString("de-DE", {
@@ -33,6 +49,15 @@ export default function LessonHistory({ allLessons = [], onRetry }) {
       month: "short",
       year: "numeric",
     });
+  };
+
+  const formatTime = (seconds) => {
+    if (!seconds) return "—";
+    const minutes = Math.floor(seconds / 60);
+    const secs = seconds % 60;
+    return minutes > 0
+      ? `${minutes} Min${secs > 0 ? ` ${secs} Sek` : ""}`
+      : `${secs} Sek`;
   };
 
   if (completed.length === 0) {
@@ -61,6 +86,14 @@ export default function LessonHistory({ allLessons = [], onRetry }) {
 
   return (
     <div className="space-y-6">
+      {/* Statistiken */}
+      <div className="grid grid-cols-2 md:grid-cols-4 gap-4">
+        <StatCard label="Abgeschlossene Lektionen" value={completed.length} icon="📖" />
+        <StatCard label="Durchschnittlicher Score" value={avgScore} icon="🎯" />
+        <StatCard label="Gesamt-XP" value={totalXp} icon="⚡" />
+        <StatCard label="Gesamt-Lernzeit" value={formatTime(totalTimeSeconds)} icon="⏱️" />
+      </div>
+
       {/* Filter */}
       <div className="flex flex-wrap gap-2">
         {categories.map((cat) => (
@@ -105,7 +138,9 @@ export default function LessonHistory({ allLessons = [], onRetry }) {
                 <h3 className="font-bold text-gray-800">{lesson.title}</h3>
                 <p className="text-sm text-gray-500">
                   {lesson.category} • +{entry.xpEarned} XP • ❤️{" "}
-                  {entry.heartsRemaining} Leben
+                  {entry.heartsRemaining} Leben • ⏱️ {formatTime(
+                    entry.timeSpentSeconds
+                  )}
                 </p>
               </div>
 
@@ -132,6 +167,19 @@ export default function LessonHistory({ allLessons = [], onRetry }) {
           </p>
         </div>
       )}
+    </div>
+  );
+}
+
+// ---------------------------------------------------------------------------
+// Kleine Statistik-Karte
+// ---------------------------------------------------------------------------
+function StatCard({ label, value, icon }) {
+  return (
+    <div className="p-4 rounded-2xl bg-white border border-gray-200 text-center">
+      <span className="text-2xl mb-2 block">{icon}</span>
+      <p className="text-2xl font-bold text-gray-800">{value}</p>
+      <p className="text-xs text-gray-500 uppercase tracking-wider">{label}</p>
     </div>
   );
 }

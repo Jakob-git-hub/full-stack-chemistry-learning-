@@ -309,7 +309,15 @@ export function UserProfileProvider({ children, user }) {
   // Lektion als abgeschlossen markieren (Objekt-Format mit Score/XP/Hearts)
   // -------------------------------------------------------------------------
   const completeLesson = useCallback(
-    async (lessonId, xpReward = 30, score = 100, heartsRemaining = 3, lessonTitle = "", lessonCategory = "") => {
+    async (
+      lessonId,
+      xpReward = 30,
+      score = 100,
+      heartsRemaining = 3,
+      lessonTitle = "",
+      lessonCategory = "",
+      timeSpent = null
+    ) => {
       if (!profile) return;
       const completed = profile.completedLessons || [];
       const already = completed.find((e) => e.lessonId === lessonId);
@@ -321,6 +329,7 @@ export function UserProfileProvider({ children, user }) {
         score,
         xpEarned: xpReward,
         heartsRemaining,
+        timeSpentSeconds: timeSpent,
       };
       const updatedCompleted = already
         ? completed.map((e) => (e.lessonId === lessonId ? entry : e))

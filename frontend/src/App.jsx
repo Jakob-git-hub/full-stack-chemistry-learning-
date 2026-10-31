@@ -5,11 +5,23 @@ import MoleculeBuilder from "./components/MoleculeBuilder";
 import LessonInProgress from "./components/LessonInProgress";
 import LessonResult from "./components/LessonResult";
 import Profile from "./components/Profile";
+import Badges from "./components/Badges";
+import Settings from "./components/Settings";
+import LessonHistory from "./components/LessonHistory";
 import AdminDashboard from "./components/AdminDashboard";
 import AdminLogin from "./components/AdminLogin";
 import AuthForm from "./components/AuthForm";
 import UserMenu from "./components/UserMenu";
 import { fetchPublishedLessons } from "./services/appwrite";
+
+// ---------------------------------------------------------------------------
+// Gespeichertes Farbthema sofort anwenden (vor dem ersten Rendern,
+// um einen Blend-Effekt beim Thema-Wechsel zu vermeiden)
+// ---------------------------------------------------------------------------
+const savedTheme = localStorage.getItem("chemvibe_theme");
+if (savedTheme) {
+  document.documentElement.dataset.theme = savedTheme;
+}
 
 // ---------------------------------------------------------------------------
 // Demo-Daten als Fallback (falls Appwrite nicht konfiguriert ist)
@@ -146,6 +158,7 @@ function InnerAppContent() {
   const [lessonResult, setLessonResult] = useState(null); // { xpReward, score, heartsRemaining }
   const [lessonKey, setLessonKey] = useState(0);
   const [lessonError, setLessonError] = useState(null);
+  const [lessonStartedAt, setLessonStartedAt] = useState(null); // Zeitstempel des Lektions-Starts
 
   const adminKeyRef = useRef({ ctrl: false, shift: false, a: false });
 
@@ -203,6 +216,15 @@ function InnerAppContent() {
     const timer = setTimeout(() => loadLessons(), 0);
     return () => clearTimeout(timer);
   }, [loadLessons]);
+
+  // -------------------------------------------------------------------------
+  // Lektions-Startzeit erfassen (für Lernzeit im Verlauf)
+  // -------------------------------------------------------------------------
+  useEffect(() => {
+    if (activeLesson) {
+      setLessonStartedAt(Date.now());
+    }
+  }, [activeLesson]);
 
   // -------------------------------------------------------------------------
   // Nächste unvollendete Lektion finden
@@ -264,6 +286,13 @@ function InnerAppContent() {
   };
 
   // -------------------------------------------------------------------------
+  // Direkt zu den dedizierten Vollbild-Ansichten
+  // -------------------------------------------------------------------------
+  const goToBadges = () => setView("badges");
+  const goToSettings = () => setView("settings");
+  const goToHistory = () => setView("history");
+
+  // -------------------------------------------------------------------------
   // Challenge abgeschlossen (XP vergeben, Ergebnis-View öffnen)
   // -------------------------------------------------------------------------
   const handleChallengeComplete = async (xpReward) => {
@@ -271,13 +300,17 @@ function InnerAppContent() {
     if (activeLesson) {
       try {
         // Demo-Modus: lokaler Abschluss-Eintrag (XP/Streak/Hearts in localStorage)
+        const timeSpent = lessonStartedAt
+          ? Math.round((Date.now() - lessonStartedAt) / 1000)
+          : null;
         result = await completeLesson(
           activeLesson.id,
           xpReward,
           100,
           3,
           activeLesson.title,
-          activeLesson.category
+          activeLesson.category,
+          timeSpent
         );
         setLessonError(null);
       } catch (err) {
@@ -351,7 +384,26 @@ function InnerAppContent() {
             <p className="text-sm text-gray-500">Organische Chemie – Lernpfad</p>
           </div>
         </div>
-        <div className="flex items-center gap-4">
+        <div className="flex items-center gap-3">
+          <div className="hidden md:flex items-center gap-2">
+            {[
+              { id: "badges", label: "🏆 Erfolge", onClick: goToBadges },
+              { id: "settings", label: "⚙️ Einstellungen", onClick: goToSettings },
+              { id: "history", label: "📜 Verlauf", onClick: goToHistory },
+            ].map((item) => (
+              <button
+                key={item.id}
+                onClick={item.onClick}
+                className={`px-3 py-1.5 rounded-lg text-xs font-medium transition-all ${
+                  view === item.id
+                    ? "bg-indigo-600 text-white shadow-sm"
+                    : "text-gray-500 hover:bg-gray-100 hover:text-gray-700"
+                }`}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
           <UserMenu onProfile={goToProfile} />
           {!user && (
             <button
@@ -597,6 +649,42 @@ function InnerAppContent() {
   );
 
   // -------------------------------------------------------------------------
+  // Erfolge-Ansicht (dediziert)
+  // -------------------------------------------------------------------------
+  const renderBadges = () => (
+    <div className="max-w-6xl mx-auto px-6 py-8">
+      {renderHeader()}
+      <main className="max-w-6xl mx-auto px-6 py-8">
+        <Badges onBack={goToSkillTree} />
+      </main>
+    </div>
+  );
+
+  // -------------------------------------------------------------------------
+  // Einstellungen-Ansicht (dediziert)
+  // -------------------------------------------------------------------------
+  const renderSettings = () => (
+    <div className="max-w-4xl mx-auto px-6 py-8">
+      {renderHeader()}
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        <Settings onBack={goToSkillTree} />
+      </main>
+    </div>
+  );
+
+  // -------------------------------------------------------------------------
+  // Verlauf-Ansicht (dediziert)
+  // -------------------------------------------------------------------------
+  const renderHistory = () => (
+    <div className="max-w-4xl mx-auto px-6 py-8">
+      {renderHeader()}
+      <main className="max-w-4xl mx-auto px-6 py-8">
+        <LessonHistory allLessons={lessons} onRetry={handleRetryLesson} />
+      </main>
+    </div>
+  );
+
+  // -------------------------------------------------------------------------
   // Auth View
   // -------------------------------------------------------------------------
   const renderAuthView = () => (
@@ -649,6 +737,12 @@ function InnerAppContent() {
         ? renderLessonResult()
         : view === "profile"
         ? renderProfile()
+        : view === "badges"
+        ? renderBadges()
+        : view === "settings"
+        ? renderSettings()
+        : view === "history"
+        ? renderHistory()
         : null}
     </div>
   );

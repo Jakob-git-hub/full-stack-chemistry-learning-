@@ -20,3 +20,81 @@
     overflow: hidden;
   }
 }
+
+/* -------------------------------------------------------------------------
+   Farbthemen (data-theme, gesetzt über Einstellungen)
+   ------------------------------------------------------------------------- */
+[data-theme="dark"] {
+  color-scheme: dark;
+}
+[data-theme="dark"] body {
+  @apply bg-slate-900 text-slate-200;
+}
+[data-theme="dark"] .bg-white {
+  @apply bg-slate-800;
+}
+[data-theme="dark"] .bg-gray-50 {
+  @apply bg-slate-900;
+}
+[data-theme="dark"] .border-gray-200,
+[data-theme="dark"] .border-gray-100 {
+  @apply border-slate-700;
+}
+[data-theme="dark"] .text-gray-800,
+[data-theme="dark"] .text-gray-900 {
+  @apply text-slate-100;
+}
+[data-theme="dark"] .text-gray-600 {
+  @apply text-slate-300;
+}
+[data-theme="dark"] .text-gray-500 {
+  @apply text-slate-400;
+}
+[data-theme="dark"] .text-gray-400 {
+  @apply text-slate-500;
+}
+[data-theme="dark"] .bg-gray-100 {
+  @apply bg-slate-700;
+}
+[data-theme="dark"] .bg-indigo-50 {
+  @apply bg-indigo-900/20;
+}
+[data-theme="dark"] .bg-rose-50 {
+  @apply bg-rose-900/20;
+}
+[data-theme="dark"] .bg-amber-50 {
+  @apply bg-amber-900/20;
+}
+[data-theme="dark"] .bg-purple-100 {
+  @apply bg-purple-900/20;
+}
+[data-theme="dark"] .bg-emerald-50 {
+  @apply bg-emerald-900/20;
+}
+
+[data-theme="warm"] body {
+  @apply bg-amber-50 text-amber-900;
+}
+[data-theme="warm"] .bg-white {
+  @apply bg-amber-50/60;
+}
+[data-theme="warm"] .bg-gray-50 {
+  @apply bg-amber-50;
+}
+[data-theme="warm"] .border-gray-200,
+[data-theme="warm"] .border-gray-100 {
+  @apply border-amber-200;
+}
+[data-theme="warm"] .text-gray-800,
+[data-theme="warm"] .text-gray-900 {
+  @apply text-amber-900;
+}
+[data-theme="warm"] .text-gray-600 {
+  @apply text-amber-700;
+}
+[data-theme="warm"] .text-gray-500 {
+  @apply text-amber-600;
+}
+[data-theme="warm"] .text-gray-400 {
+  @apply text-amber-500;
+}

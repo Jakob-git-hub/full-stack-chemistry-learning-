@@ -1,7 +1,7 @@
 // ---------------------------------------------------------------------------
 // Einzelnes Achievement-Badge (gesperrt / freigeschaltet)
 // ---------------------------------------------------------------------------
-export default function AchievementBadge({ achievement }) {
+export default function AchievementBadge({ achievement, unlockedAt }) {
   const {
     unlocked,
     progress,
@@ -12,6 +12,15 @@ export default function AchievementBadge({ achievement }) {
     category,
   } = achievement;
   const pct = maxProgress > 0 ? Math.round((progress / maxProgress) * 100) : 0;
+
+  const formatDate = (iso) => {
+    if (!iso) return "—";
+    return new Date(iso).toLocaleDateString("de-DE", {
+      day: "numeric",
+      month: "short",
+      year: "numeric",
+    });
+  };
 
   return (
     <div
@@ -48,6 +57,11 @@ export default function AchievementBadge({ achievement }) {
       }`}>
         {description}
       </p>
+      {unlocked && unlockedAt && (
+        <p className="mt-1 text-xs text-emerald-500">
+          Freigeschaltet am {formatDate(unlockedAt)}
+        </p>
+      )}
 
       {/* Fortschrittsbalken */}
       <div className="w-full bg-gray-100 rounded-full h-2.5 mb-2 overflow-hidden">
