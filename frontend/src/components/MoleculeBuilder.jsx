@@ -174,7 +174,9 @@ export default function MoleculeBuilder({
         const userAtomCounts = countAtomsByType(atoms);
         const targetAtomCounts = countAtomsByType(target_atoms);
 
-        const atomsMatch = JSON.stringify(userAtomCounts) === JSON.stringify(targetAtomCounts);
+        const atomsMatch = Object.keys({ ...userAtomCounts, ...targetAtomCounts }).every(
+          (key) => (userAtomCounts[key] || 0) === (targetAtomCounts[key] || 0)
+        );
         const bondsMatch =
           target_bonds === null || bonds.length === target_bonds;
 
@@ -187,7 +189,9 @@ export default function MoleculeBuilder({
         const userAtomCounts = countAtomsByType(atoms);
         const targetAtomCounts = countAtomsByType(target_atoms);
 
-        const atomsMatch = JSON.stringify(userAtomCounts) === JSON.stringify(targetAtomCounts);
+        const atomsMatch = Object.keys({ ...userAtomCounts, ...targetAtomCounts }).every(
+          (key) => (userAtomCounts[key] || 0) === (targetAtomCounts[key] || 0)
+        );
         const bondsMatch =
           target_bonds === null || bonds.length === target_bonds;
 

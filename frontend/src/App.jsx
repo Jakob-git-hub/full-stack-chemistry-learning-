@@ -145,6 +145,7 @@ function InnerAppContent() {
   const [authMode, setAuthMode] = useState("login"); // 'login' | 'register'
   const [lessonResult, setLessonResult] = useState(null); // { xpReward, score, heartsRemaining }
   const [lessonKey, setLessonKey] = useState(0);
+  const [lessonError, setLessonError] = useState(null);
 
   const adminKeyRef = useRef({ ctrl: false, shift: false, a: false });
 
@@ -267,25 +268,23 @@ function InnerAppContent() {
   // -------------------------------------------------------------------------
   const handleChallengeComplete = async (xpReward) => {
     let result = null;
-    if (user && activeLesson) {
-      result = await completeLesson(
-        activeLesson.id,
-        xpReward,
-        100,
-        3,
-        activeLesson.title,
-        activeLesson.category
-      );
-    } else {
-      // Demo-Modus: lokaler Abschluss-Eintrag (XP/Streak/Hearts in localStorage)
-      result = await completeLesson(
-        activeLesson.id,
-        xpReward,
-        100,
-        3,
-        activeLesson.title,
-        activeLesson.category
-      );
+    if (activeLesson) {
+      try {
+        // Demo-Modus: lokaler Abschluss-Eintrag (XP/Streak/Hearts in localStorage)
+        result = await completeLesson(
+          activeLesson.id,
+          xpReward,
+          100,
+          3,
+          activeLesson.title,
+          activeLesson.category
+        );
+        setLessonError(null);
+      } catch (err) {
+        console.error("Fehler beim Abschluss der Lektion:", err);
+        setLessonError("Die Lektion konnte nicht abgeschlossen werden. Bitte versuche es erneut.");
+        return; // Nicht in Ergebnis-Ansicht wechseln, UI bleibt konsistent
+      }
     }
     setLessonResult({
       xpReward,
@@ -542,6 +541,17 @@ function InnerAppContent() {
               </p>
             </div>
           )}
+          {lessonError && (
+            <div className="mt-6 p-4 rounded-xl bg-rose-50 border border-rose-200 text-center">
+              <p className="text-sm text-rose-700 font-semibold">{lessonError}</p>
+              <button
+                onClick={() => setLessonError(null)}
+                className="mt-2 text-xs text-rose-600 hover:underline"
+              >
+                Fehler ausblenden
+              </button>
+            </div>
+          )}
         </main>
       </div>
     );
@@ -607,6 +617,7 @@ function InnerAppContent() {
             setIsAdmin(false);
             setAdminMode("login");
           }}
+          onPublish={loadLessons}
         />
       );
     }

@@ -40,6 +40,26 @@ export const APPWRITE_CONFIG = {
 };
 
 /**
+ * Parst das `challenge`-Feld, falls es als JSON-String gespeichert wurde
+ * (z. B. durch `json.dumps()` im Backend). Ist es bereits ein Objekt, wird
+ * es unverändert zurückgegeben.
+ */
+function parseChallenge(challenge) {
+  if (challenge === null || challenge === undefined) {
+    return challenge;
+  }
+  if (typeof challenge === "string") {
+    try {
+      return JSON.parse(challenge);
+    } catch (err) {
+      console.warn("Fehler beim Parsen des challenge-Felds:", err.message);
+      return challenge;
+    }
+  }
+  return challenge;
+}
+
+/**
  * Lädt alle Lektionen aus der Appwrite-Collection `lessons`.
  * Optional filterbar nach Status (z.B. "published" für den öffentlichen Lernpfad).
  */
@@ -61,7 +81,7 @@ export async function fetchLessons(statusFilter = null) {
       title: doc.title,
       category: doc.category,
       theory: doc.theory,
-      challenge: doc.challenge,
+      challenge: parseChallenge(doc.challenge),
       status: doc.status,
       topic: doc.topic,
       createdAt: doc.$createdAt,
@@ -89,7 +109,7 @@ export async function fetchLessonById(lessonId) {
       title: doc.title,
       category: doc.category,
       theory: doc.theory,
-      challenge: doc.challenge,
+      challenge: parseChallenge(doc.challenge),
       status: doc.status,
       topic: doc.topic,
       createdAt: doc.$createdAt,

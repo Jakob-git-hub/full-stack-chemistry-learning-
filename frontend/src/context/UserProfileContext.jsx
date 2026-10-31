@@ -326,12 +326,33 @@ export function UserProfileProvider({ children, user }) {
         ? completed.map((e) => (e.lessonId === lessonId ? entry : e))
         : [...completed, entry];
 
-      await updateProfile({ completedLessons: updatedCompleted });
-      const xpResult = await addXp(xpReward);
-      await incrementStreak();
-      return { ...xpResult, lessonEntry: entry };
+      // XP + Level lokal berechnen (wie addXp, aber ohne separaten Schreibvorgang)
+      const newXp = (profile.xp || 0) + xpReward;
+      const newLevel = Math.floor(newXp / 100) + 1;
+      const leveledUp = newLevel > (profile.level || 1);
+
+      // Streak lokal berechnen (wie incrementStreak, aber ohne separaten Schreibvorgang)
+      const today = new Date().toISOString().slice(0, 10);
+      let newStreak = profile.streak || 0;
+      let newLastLessonDate = profile.lastLessonDate;
+      if (profile.lastLessonDate !== today) {
+        newStreak = newStreak + 1;
+        newLastLessonDate = today;
+      }
+
+      // Ein einziger Appwrite-Schreibvorgang mit allen Feldern auf einmal
+      // (vermeidet 3 sequentielle Netzwerkaufrufe und Zwischenzustände)
+      await updateProfile({
+        completedLessons: updatedCompleted,
+        xp: newXp,
+        level: newLevel,
+        streak: newStreak,
+        lastLessonDate: newLastLessonDate,
+      });
+
+      return { newXp, newLevel, leveledUp, lessonEntry: entry };
     },
-    [profile, updateProfile, addXp, incrementStreak]
+    [profile, updateProfile]
   );
 
   // -------------------------------------------------------------------------

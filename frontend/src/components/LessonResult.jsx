@@ -110,8 +110,7 @@ export default function LessonResult({
   onReviewMistakes,
   onBackToSkillTree,
 }) {
-  const { profile, addXp, incrementStreak } = useUserProfile();
-  const [xpAwarded, setXpAwarded] = useState(false);
+  const { profile } = useUserProfile();
   const [showConfetti, setShowConfetti] = useState(true);
   const [leveledUp, setLeveledUp] = useState(false);
   const [newLevel, setNewLevel] = useState(1);
@@ -121,18 +120,10 @@ export default function LessonResult({
   const hearts = profile?.hearts ?? 3;
   const level = profile?.level ?? 1;
 
-  // XP einmalig vergeben + Streak erhöhen beim Mount
+  // Confetti beim Mount. XP und Streak werden genau einmal in
+  // handleChallengeComplete via completeLesson vergeben (kein Double-Counting).
   useEffect(() => {
-    if (xpAwarded) return;
     setTimeout(() => setShowConfetti(true), 0);
-    addXp(xpReward).then((result) => {
-      if (result) {
-        setLeveledUp(result.leveledUp);
-        setNewLevel(result.newLevel);
-      }
-      setXpAwarded(true);
-    });
-    incrementStreak();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 

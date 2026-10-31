@@ -55,6 +55,9 @@ LLM_API_KEY = os.getenv("LLM_API_KEY", "")
 LLM_API_URL = os.getenv("LLM_API_URL", "https://integrate.api.nvidia.com/v1")
 LLM_MODEL = os.getenv("LLM_MODEL", "nvidia/nemotron-3.5-super-49b-v1")
 
+ALLOWED_ORIGINS_RAW = os.getenv("ALLOWED_ORIGINS", "")
+ALLOWED_ORIGINS = [o.strip() for o in ALLOWED_ORIGINS_RAW.split(",") if o.strip()] if ALLOWED_ORIGINS_RAW else []
+
 # ---------------------------------------------------------------------------
 # FastAPI application
 # ---------------------------------------------------------------------------
@@ -66,7 +69,7 @@ app = FastAPI(
 
 app.add_middleware(
     CORSMiddleware,
-    allow_origins=["*"],
+    allow_origins=ALLOWED_ORIGINS,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -404,7 +407,7 @@ def save_lesson_to_appwrite(lesson: LessonStructure, topic: str) -> str:
         "title": lesson.title,
         "category": lesson.category,
         "theory": lesson.theory,
-        "challenge": json.dumps(lesson.challenge.model_dump()),
+        "challenge": lesson.challenge.model_dump(),
         "status": "draft",
         "topic": topic,
     }
@@ -610,7 +613,8 @@ class ScrapedDataRequest(BaseModel):
 @app.post("/api/scraped-data", status_code=status.HTTP_201_CREATED)
 @app.post("/scraped-data", status_code=status.HTTP_201_CREATED)
 async def ingest_scraped_data(request: ScrapedDataRequest):
-    """Receives scraped items from the Zyte spider. Logs them and returns success."""
+    """Receives scraped items from the Zyte spider, structures them into a lesson
+    via LangChain, and saves the lesson as a draft in Appwrite."""
     import logging
 
     logger = logging.getLogger("chemvibe.scraped_data")
@@ -623,10 +627,63 @@ async def ingest_scraped_data(request: ScrapedDataRequest):
     for item in request.items:
         logger.debug("Scraped item: %s", item)
 
-    return {
-        "status": "ok",
-        "message": "Scraped data received",
-        "spider": request.spider,
-        "items_received": len(request.items),
-        "scraped_at": request.scraped_at,
-    }
+    if not request.items:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="No scraped items received",
+        )
+
+    # Determine the topic from the scraped items (all items usually share one topic)
+    topic = ""
+    for item in request.items:
+        if item.get("topic"):
+            topic = item["topic"]
+            break
+    if not topic:
+        topic = request.spider or "chemistry"
+
+    # Convert scraped items into the raw_data format expected by structure_lesson
+    raw_data = []
+    for item in request.items:
+        raw_data.append(
+            {
+                "url": item.get("url", ""),
+                "status": "success",
+                "data": {
+                    "title": item.get("title", ""),
+                    "text": item.get("text", ""),
+                    "html": item.get("html", ""),
+                    "language": item.get("language", ""),
+                    "category": item.get("category", ""),
+                    "topic": item.get("topic", ""),
+                    "source": item.get("source", ""),
+                    "scraped_at": item.get("scraped_at", ""),
+                },
+            }
+        )
+
+    try:
+        # Structure the scraped data into a lesson via LangChain LLM
+        lesson = await structure_lesson(topic, raw_data, "medium")
+
+        # Save the lesson as a draft in Appwrite
+        doc_id = save_lesson_to_appwrite(lesson, topic)
+
+        return {
+            "status": "ok",
+            "message": "Scraped data processed into a lesson draft",
+            "spider": request.spider,
+            "lesson_id": doc_id,
+            "title": lesson.title,
+            "category": lesson.category,
+            "lesson_status": "draft",
+            "items_received": len(request.items),
+            "scraped_at": request.scraped_at,
+        }
+    except HTTPException:
+        raise
+    except Exception as exc:  # noqa: BLE001
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Fehler bei der Verarbeitung der gescrapten Daten: {exc!s}",
+        )

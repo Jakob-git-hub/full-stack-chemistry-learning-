@@ -71,7 +71,7 @@ export default function LessonInProgress({
   onResume,
   onBack,
 }) {
-  const { profile, loseHeart, addXp } = useUserProfile();
+  const { profile, loseHeart } = useUserProfile();
   const hearts = profile?.hearts ?? 3;
   const [isPaused, setIsPaused] = useState(false);
   const [theoryPct, setTheoryPct] = useState(0);

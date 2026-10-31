@@ -4,7 +4,7 @@ import { fetchDrafts, fetchLessonById } from "../services/appwrite";
 // ---------------------------------------------------------------------------
 // Admin Dashboard Komponente
 // ---------------------------------------------------------------------------
-export default function AdminDashboard({ onClose }) {
+export default function AdminDashboard({ onClose, onPublish }) {
   const [drafts, setDrafts] = useState([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState(null);
@@ -62,13 +62,15 @@ export default function AdminDashboard({ onClose }) {
         lessonId,
         {
           status: "published",
-          updated_at: new Date().toISOString(),
+          $updatedAt: new Date().toISOString(),
         }
       );
 
       // Lokal aktualisieren
       setDrafts((prev) => prev.filter((d) => d.id !== lessonId));
       setSelectedLesson(null);
+      // Skill-Tree in der Haupt-App aktualisieren, damit die neue Lektion erscheint
+      onPublish?.();
     } catch (err) {
       console.error("Fehler beim Veröffentlichen:", err);
       setError("Veröffentlichung fehlgeschlagen.");

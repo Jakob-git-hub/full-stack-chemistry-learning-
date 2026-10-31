@@ -411,20 +411,62 @@ def test_publish_lesson_appwrite_not_configured(monkeypatch):
 
 
 def test_ingest_scraped_data_endpoint():
-    """POST /api/scraped-data accepts spider items and returns success."""
-    response = client.post(
-        "/api/scraped-data",
-        json={
-            "spider": "chemistry",
-            "items": [{"title": "Nukleophile Substitution", "url": "https://example.com"}],
-            "scraped_at": "2026-10-28T19:32:25Z",
-        },
+    """POST /api/scraped-data accepts spider items and creates a lesson draft."""
+    lesson = LessonStructure(
+        title="Nukleophile Substitution",
+        category="Reaktionsmechanismen",
+        theory="Bei einer SN2-Reaktion greift das Nukleophil von der Rueckseite an.",
+        challenge=Challenge(
+            type="molecule_builder",
+            question="Baue das Produkt der SN2-Reaktion.",
+            difficulty="medium",
+            target_smiles="CO",
+            target_atoms=[{"type": "carbon", "x": 200, "y": 200}],
+            target_bonds=1,
+            preplaced_atoms=[],
+            palette_atoms=[{"type": "carbon", "symbol": "C", "name": "Kohlenstoff"}],
+        ),
     )
+
+    with patch(
+        "main.structure_lesson", new=AsyncMock(return_value=lesson)
+    ), patch("main.save_lesson_to_appwrite", return_value="lesson-scraped-123"):
+        response = client.post(
+            "/api/scraped-data",
+            json={
+                "spider": "chemistry",
+                "items": [
+                    {
+                        "title": "Nukleophile Substitution",
+                        "url": "https://example.com",
+                        "text": "Bei einer SN2-Reaktion ...",
+                        "topic": "SN2-Reaktion",
+                        "category": "Reaktionsmechanismen",
+                        "source": "example.com",
+                    }
+                ],
+                "scraped_at": "2026-10-28T19:32:25Z",
+            },
+        )
+
     assert response.status_code == status.HTTP_201_CREATED
     data = response.json()
     assert data["status"] == "ok"
     assert data["spider"] == "chemistry"
     assert data["items_received"] == 1
+    assert data["lesson_id"] == "lesson-scraped-123"
+    assert data["lesson_status"] == "draft"
+    assert data["title"] == "Nukleophile Substitution"
+    assert data["category"] == "Reaktionsmechanismen"
+
+
+def test_ingest_scraped_data_endpoint_empty_items():
+    """POST /api/scraped-data with no items returns 400."""
+    response = client.post(
+        "/api/scraped-data",
+        json={"spider": "chemistry", "items": []},
+    )
+    assert response.status_code == status.HTTP_400_BAD_REQUEST
 
 
 # ---------------------------------------------------------------------------
