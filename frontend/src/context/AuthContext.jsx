@@ -94,7 +94,7 @@ export function AuthProvider({ children }) {
   const login = async (email, password) => {
     setError(null);
     try {
-      await account.createSession('me', email, password);
+      await account.createEmailSession(email, password);
       const currentUser = await account.get();
       setUser(currentUser);
       return currentUser;
